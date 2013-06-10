@@ -440,6 +440,10 @@ is_deeply \@emit, [[
     "bundle.dest_dir=_build/sql
 bundle.from=gamma
 bundle.tags_only=true
+core.cubrid.client=/home/stefan/bin/CUBRID/bin/csql
+core.cubrid.host=localhost
+core.cubrid.sqitch_db=sqitchmeta
+core.cubrid.user=dba
 core.engine=pg
 core.extension=ddl
 core.mysql.client=/opt/local/mysql/bin/mysql
@@ -500,7 +504,11 @@ revert.to=gamma
     }), 'Create user config list command';
     ok $cmd->execute, 'List the user config';
     is_deeply \@emit, [[
-        "core.mysql.client=/opt/local/mysql/bin/mysql
+        "core.cubrid.client=$ENV{CUBRID}/bin/csql
+core.cubrid.host=localhost
+core.cubrid.sqitch_db=sqitchmeta
+core.cubrid.user=dba
+core.mysql.client=/opt/local/mysql/bin/mysql
 core.mysql.sqitch_prefix=meta
 core.mysql.username=root
 core.pg.client=/opt/local/pgsql/bin/psql
