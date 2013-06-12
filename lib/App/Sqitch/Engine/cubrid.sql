@@ -1,5 +1,12 @@
+-- Sqitch database deployment metadata v1.0. for CUBRID
 
--- Sqitch database deployment metadata v1.0.
+/*
+ * Differences from Pg and Oracle:
+ *  - No TIME ZONE in CUBRID, only plain TIMESTAMP type (v <= 9.1.0)
+ *  - Array -> LIST ( = SEQUENCE )
+ *    http://www.cubrid.org/manual/90/en/LIST|SEQUENCE
+ *  - CHANGE is a reserved word! -> Col 'change' renamed to 'change_name'
+*/
 
 CREATE TABLE projects (
     project         VARCHAR(512)       PRIMARY KEY,
@@ -17,9 +24,6 @@ COMMENT ON COLUMN projects.created_at     IS 'Date the project was added to the 
 COMMENT ON COLUMN projects.creator_name   IS 'Name of the user who added the project.';
 COMMENT ON COLUMN projects.creator_email  IS 'Email address of the user who added the project.';
 */
-
--- CHANGE is a reserved word?
--- change renamed to change_name
 
 CREATE TABLE changes (
     change_id       CHAR(40)        NOT NULL PRIMARY KEY,
