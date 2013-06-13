@@ -683,7 +683,8 @@ sub log_deploy_change {
 sub _log_event {
     my ( $self, $event, $change, $tags, $requires, $conflicts) = @_;
 
-    # Can't insert SEQUENCE with parameteres?
+    # Can insert SEQUENCE with parameters? Not yet ;)
+    # http://www.cubrid.org/home_page/677557
     # CUBRID DBMS Error : (-494) Semantic: Cannot coerce host var to type
     # sequence.  at ... line ...
     my $tg = $tags      || $self->_log_tags_param($change);
