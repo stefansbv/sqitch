@@ -1,3 +1,16 @@
+# Differences from other engines:
+#  Pg Array -> CUBRID SEQUENCE
+#  CHANGE is a reserved word!: Col 'change' renamed to 'change_name'
+#  csql doesn't have a '--quiet' option
+#  No TIME ZONE in CUBRID, only plain TIMESTAMP type (v <= 9.1.0)
+
+# Problems:
+#  tested only with CUBRID 9.1
+#  many tests are disabled
+#  LOCK TABLE changes IN EXCLUSIVE MODE? howto?
+#  Use of uninitialized value $replength in numeric gt ... from the log command
+#  Many other problems, probably :)
+
 package App::Sqitch::Engine::cubrid;
 
 use 5.010;
@@ -11,8 +24,6 @@ use Locale::TextDomain qw(App-Sqitch);
 use App::Sqitch::Plan::Change;
 use List::Util qw(first);
 use namespace::autoclean;
-
-use Data::Printer;
 
 extends 'App::Sqitch::Engine';
 sub dbh; # required by DBIEngine;
@@ -65,7 +76,7 @@ has sqitch_db => (
         if (my $db = $self->sqitch->config->get( key => 'core.cubrid.sqitch_db' ) ) {
             return $db;
         }
-        # A default name?
+        # A default name here?
         return 'sqitchmeta';
     },
 );
@@ -84,21 +95,6 @@ has db_name => (
             || try { $sqitch->plan->project }
             || return undef;
         return $name;
-    },
-);
-
-has destination => (
-    is       => 'ro',
-    isa      => 'Str',
-    lazy     => 1,
-    required => 1,
-    default  => sub {
-        my $self = shift;
-        $self->db_name
-            # || $ENV{CUBDATABASE}
-            # || $self->username
-            # || $ENV{CUBUSER}
-            # || $self->sqitch->sysuser
     },
 );
 
@@ -132,7 +128,34 @@ has csql => (
     auto_deref => 1,
     default    => sub {
         my $self = shift;
-        [ $self->client, qw( --CS-mode --single-line --no-pager) ];
+        my @ret  = ( $self->client );
+        for my $spec (
+            [ user     => $self->user     ],
+            [ password => $self->password ],
+            )
+        {
+            push @ret, "--$spec->[0]" => $spec->[1] if $spec->[1];
+        }
+
+        push @ret => (
+            '--CS-mode',
+            '--single-line',
+            '--no-pager',
+        );
+
+        # csql [options] database_name@remote_host_name
+        # There is no port option!, "the port number used by the
+        # master process on the remote host must be identical to the
+        # one on the local host"
+        my $db_name = '';
+        if ( $self->db_name ) {
+            $db_name = $self->db_name;
+            $db_name .= '@' . $self->host
+                if $self->host;
+            push @ret, $db_name;
+        }
+        #print "csql: @ret\n";
+        return \@ret;
     },
 );
 
@@ -146,14 +169,18 @@ has dbh => (
             hurl cubrid => __ 'DBD::cubrid module required to manage CUBRID' if $@;
         };
 
+        $self->sqitch_db || hurl cubrid => __(
+            'No database specified; use --db-name set "core.cubrid.db_name" via sqitch config'
+        );
+
         my $dsn = 'dbi:cubrid:' . join ';' => map {
             "$_->[0]=$_->[1]"
         } grep { $_->[1] } (
-            [ database => $self->db_name  ],
-            [ host     => $self->host     ],
-            [ port     => $self->port     ],
+            [ database => $self->sqitch_db ],
+            [ host     => $self->host      ],
+            [ port     => $self->port      ],
         );
-        print "DSN: $dsn\n";
+
         my $user = $self->user ? $self->user : 'dba';
 
         DBI->connect($dsn, $user, $self->password, {
@@ -166,65 +193,60 @@ has dbh => (
                 @_ = ($dbh->state || 'DEV' => $dbh->errstr);
                 goto &hurl;
             },
-            # Callbacks         => {
-            #     connected => sub {
-            #         my $dbh = shift;
-            #         $dbh->do('PRAGMA foreign_keys = ON');
-            #         return;
-            #     },
-            # },
         });
     }
 );
 
+#???
+sub destination { shift->db_name; }
+
+sub meta_destination { shift->sqitch_db; }
+#???
+
 sub config_vars {
     return (
-        client   => 'any',
-        user     => 'any',
-        password => 'any',
+        client    => 'any',
+        user      => 'any',
+        password  => 'any',
         sqitch_db => 'any',
-        db_name  => 'any',
-        host     => 'any',
-        port     => 'int',
+        db_name   => 'any',
+        host      => 'any',
+        port      => 'int',
     );
 }
 
 sub _log_tags_param {
-    [ map { $_->format_name } $_[1]->tags ];
+    my $str = join ',' => map { $_->format_name } $_[1]->tags;
+    return "{'" . $str . "'}";
 }
 
 sub _log_requires_param {
-    [ map { $_->as_string } $_[1]->requires ];
+    my $str = join ',' => map { $_->as_string } $_[1]->requires;
+    return "{'" . $str . "'}";
 }
 
 sub _log_conflicts_param {
-    [ map { $_->as_string } $_[1]->conflicts ];
+    my $str = join ',' => map { $_->as_string } $_[1]->conflicts;
+    return "{'" . $str . "'}";
 }
 
 sub _ts2char_format {
-    q{to_char(%1$s AT TIME ZONE 'UTC', '"year":YYYY:"month":MM:"day":DD') || to_char(%1$s AT TIME ZONE 'UTC', ':"hour":HH24:"minute":MI:"second":SS:"time_zone":"UTC"')}
+    q{to_char(%1$s, '"year":YYYY:"month":MM:"day":DD') || to_char(%1$s, ':"hour":HH24:"minute":MI:"second":SS:"time_zone":"UTC"')}
 }
 
 sub _ts_default { 'current_timestamp' }
 
 sub _char2ts {
     my $dt = $_[1];
-    join ' ', $dt->ymd('-'), $dt->hms(':'), $dt->time_zone->name;
+    $dt->set_time_zone('UTC');
+    return join ' ', $dt->ymd('-'), $dt->hms(':');
 }
 
 sub _listagg_format {
-    # http://stackoverflow.com/q/16313631/79202
-    return q{COLLECT(%s)};
+    q{CONCAT_WS(' ', %s)};
 }
 
-sub _regex_op { 'REGEXP_LIKE(%s, ?)' }
-
-sub _simple_from { ' FROM dual' }
-
-sub _multi_values {
-    my ($self, $count, $expr) = @_;
-    return join "\nUNION ALL ", ("SELECT $expr FROM dual") x $count;
-}
+sub _regex_op { 'REGEXP(%s, ?)' }
 
 sub _dt($) {
     require App::Sqitch::DateTime;
@@ -233,15 +255,6 @@ sub _dt($) {
 
 sub _cid {
     my ( $self, $ord, $offset, $project ) = @_;
-
-    # my $config = App::Sqitch::Config->new;
-    # say scalar $config->dump;
-
-    print 'Sqitch is ', $self->initialized ? ' YES ' : ' NOT ', 'initialized', "\n";
-    print "ord is $ord\n";
-    print "offset is $offset\n";
-    print "project is $project\n";
-
     return try {
         return $self->dbh->selectcol_arrayref(qq{
             SELECT change_id FROM (
@@ -266,7 +279,7 @@ sub _cid_head {
             SELECT change_id
               FROM changes
              WHERE project = ?
-               AND change  = ?
+               AND change_name  = ?
              ORDER BY committed_at DESC
         ) WHERE rownum = 1
     }, undef, $project, $change)->[0];
@@ -278,14 +291,11 @@ sub current_state {
     my $pdtcol = sprintf $self->_ts2char_format, 'c.planned_at';
     my $tagcol = sprintf $self->_listagg_format, 't.tag';
     my $dbh    = $self->dbh;
-    # XXX Oy, placeholders do not work with COLLECT() in this query.
-    # http://www.nntp.perl.org/group/perl.dbi.users/2013/05/msg36581.html
-    # http://stackoverflow.com/q/16407560/79202
     my $qproj  = $dbh->quote($project // $self->plan->project);
     my $state  = $dbh->selectrow_hashref(qq{
         SELECT * FROM (
             SELECT c.change_id
-                 , c.change
+                 , c.change_name
                  , c.project
                  , c.note
                  , c.committer_name
@@ -299,7 +309,7 @@ sub current_state {
               LEFT JOIN tags t ON c.change_id = t.change_id
              WHERE c.project = $qproj
              GROUP BY c.change_id
-                 , c.change
+                 , c.change_name
                  , c.project
                  , c.note
                  , c.committer_name
@@ -311,6 +321,9 @@ sub current_state {
              ORDER BY c.committed_at DESC
         ) WHERE rownum = 1
     }) or return undef;
+    unless (ref $state->{tags}) {
+        $state->{tags} = $state->{tags} ? [ split / / => $state->{tags} ] : [];
+    }
     $state->{committed_at} = _dt $state->{committed_at};
     $state->{planned_at}   = _dt $state->{planned_at};
     return $state;
@@ -320,67 +333,38 @@ sub deployed_changes {
     my $self   = shift;
     my $tscol  = sprintf $self->_ts2char_format, 'c.planned_at';
     my $tagcol = sprintf $self->_listagg_format, 't.tag';
-    # XXX Oy, placeholders do not work with COLLECT() in this query.
-    # http://www.nntp.perl.org/group/perl.dbi.users/2013/05/msg36581.html
-    # http://stackoverflow.com/q/16407560/79202
-    my $qproj  = $self->dbh->quote($self->plan->project);
     return map {
         $_->{timestamp} = _dt $_->{timestamp};
+        unless (ref $_->{tags}) {
+            $_->{tags} = $_->{tags} ? [ split / / => $_->{tags} ] : [];
+        }
         $_;
     } @{ $self->dbh->selectall_arrayref(qq{
-        SELECT c.change_id AS id, c.change AS name, c.project, c.note,
-               $tscol AS timestamp, c.planner_name, c.planner_email,
+        SELECT c.change_id AS id, c.change_name AS name, c.project, c.note,
+               $tscol AS [timestamp], c.planner_name, c.planner_email,
                $tagcol AS tags
           FROM changes   c
           LEFT JOIN tags t ON c.change_id = t.change_id
-         WHERE c.project = $qproj
-         GROUP BY c.change_id, c.change, c.project, c.note, c.planned_at,
+         WHERE c.project = ?
+         GROUP BY c.change_id, c.change_name, c.project, c.note, c.planned_at,
                c.planner_name, c.planner_email, c.committed_at
          ORDER BY c.committed_at ASC
-    }, { Slice => {} } ) };
-}
-
-sub deployed_changes_since {
-    my ( $self, $change ) = @_;
-    my $tscol  = sprintf $self->_ts2char_format, 'c.planned_at';
-    my $tagcol = sprintf $self->_listagg_format, 't.tag';
-    # XXX Oy, placeholders do not work with COLLECT() in this query.
-    # http://www.nntp.perl.org/group/perl.dbi.users/2013/05/msg36581.html
-    # http://stackoverflow.com/q/16407560/79202
-    my $qproj  = $self->dbh->quote($self->plan->project);
-    return map {
-        $_->{timestamp} = _dt $_->{timestamp};
-        $_;
-    } @{ $self->dbh->selectall_arrayref(qq{
-        SELECT c.change_id AS id, c.change AS name, c.project, c.note,
-               $tscol AS timestamp, c.planner_name, c.planner_email,
-               $tagcol AS tags
-          FROM changes   c
-          LEFT JOIN tags t ON c.change_id = t.change_id
-         WHERE c.project = $qproj
-           AND c.committed_at > (SELECT committed_at FROM changes WHERE change_id = ?)
-         GROUP BY c.change_id, c.change, c.project, c.note, c.planned_at,
-               c.planner_name, c.planner_email, c.committed_at
-         ORDER BY c.committed_at ASC
-    }, { Slice => {} }, $change->id) };
+    }, { Slice => {} }, $self->plan->project) };
 }
 
 sub load_change {
     my ( $self, $change_id ) = @_;
     my $tscol  = sprintf $self->_ts2char_format, 'c.planned_at';
     my $tagcol = sprintf $self->_listagg_format, 't.tag';
-    # XXX Oy, placeholders do not work with COLLECT() in this query.
-    # http://www.nntp.perl.org/group/perl.dbi.users/2013/05/msg36581.html
-    # http://stackoverflow.com/q/16407560/79202
     my $qcid   = $self->dbh->quote($change_id);
     my $change = $self->dbh->selectrow_hashref(qq{
-        SELECT c.change_id AS id, c.change AS name, c.project, c.note,
+        SELECT c.change_id AS id, c.change_name AS name, c.project, c.note,
                $tscol AS timestamp, c.planner_name, c.planner_email,
                 $tagcol AS tags
           FROM changes   c
           LEFT JOIN tags t ON c.change_id = t.change_id
          WHERE c.change_id = $qcid
-         GROUP BY c.change_id, c.change, c.project, c.note, c.planned_at,
+         GROUP BY c.change_id, c.change_name, c.project, c.note, c.planned_at,
                c.planner_name, c.planner_email
     }, undef) || return undef;
     $change->{timestamp} = _dt $change->{timestamp};
@@ -404,90 +388,37 @@ sub initialized {
     }, undef, 'changes')->[0];
 }
 
-sub _log_event {
-    my ( $self, $event, $change, $tags, $requires, $conflicts) = @_;
-    my $dbh    = $self->dbh;
-    my $sqitch = $self->sqitch;
-
-    $tags      ||= $self->_log_tags_param($change);
-    $requires  ||= $self->_log_requires_param($change);
-    $conflicts ||= $self->_log_conflicts_param($change);
-
-    # Use the sqitch_array() constructor to insert arrays of values.
-    my $tag_ph = 'sqitch_array('. join(', ', ('?') x @{ $tags      }) . ')';
-    my $req_ph = 'sqitch_array('. join(', ', ('?') x @{ $requires  }) . ')';
-    my $con_ph = 'sqitch_array('. join(', ', ('?') x @{ $conflicts }) . ')';
-    my $ts     = $self->_ts_default;
-
-    $dbh->do(qq{
-        INSERT INTO events (
-              event
-            , change_id
-            , change
-            , project
-            , note
-            , tags
-            , requires
-            , conflicts
-            , committer_name
-            , committer_email
-            , planned_at
-            , planner_name
-            , planner_email
-            , committed_at
-        )
-        VALUES (?, ?, ?, ?, ?, $tag_ph, $req_ph, $con_ph, ?, ?, ?, ?, ?, $ts)
-    }, undef,
-        $event,
-        $change->id,
-        $change->name,
-        $change->project,
-        $change->note,
-        @{ $tags      },
-        @{ $requires  },
-        @{ $conflicts },
-        $sqitch->user_name,
-        $sqitch->user_email,
-        $self->_char2ts( $change->timestamp ),
-        $change->planner_name,
-        $change->planner_email,
-    );
-
-    return $self;
-}
-
 sub changes_requiring_change {
     my ( $self, $change ) = @_;
-    # Why CTE: https://forums.cubrid.com/forums/thread.jspa?threadID=1005221
     return @{ $self->dbh->selectall_arrayref(q{
-        WITH tag AS (
-            SELECT tag, committed_at, project,
-                   ROW_NUMBER() OVER (partition by project ORDER BY committed_at) AS rnk
-              FROM tags
-        )
-        SELECT c.change_id, c.project, c.change, t.tag AS asof_tag
+        SELECT c.change_id, c.project, c.change_name AS [change], (
+            SELECT tag
+              FROM changes c2
+              JOIN tags ON c2.change_id = tags.change_id
+             WHERE c2.project = c.project
+               AND c2.committed_at >= c.committed_at
+             ORDER BY c2.committed_at
+             LIMIT 1
+        ) AS asof_tag
           FROM dependencies d
-          JOIN changes  c ON c.change_id = d.change_id
-          LEFT JOIN tag t ON t.project   = c.project AND t.committed_at >= c.committed_at
+          JOIN changes c ON c.change_id = d.change_id
          WHERE d.dependency_id = ?
-           AND (t.rnk IS NULL OR t.rnk = 1)
     }, { Slice => {} }, $change->id) };
 }
 
 sub name_for_change_id {
     my ( $self, $change_id ) = @_;
-    # Why CTE: https://forums.cubrid.com/forums/thread.jspa?threadID=1005221
     return $self->dbh->selectcol_arrayref(q{
-        WITH tag AS (
-            SELECT tag, committed_at, project,
-                   ROW_NUMBER() OVER (partition by project ORDER BY committed_at) AS rnk
-              FROM tags
-        )
-        SELECT change || COALESCE(t.tag, '')
+        SELECT change_name AS [change] || COALESCE((
+            SELECT tag
+              FROM changes c2
+              JOIN tags ON c2.change_id = tags.change_id
+             WHERE c2.committed_at >= c.committed_at
+               AND c2.project = c.project
+             LIMIT 1
+        ), '')
           FROM changes c
-          LEFT JOIN tag t ON c.project = t.project AND t.committed_at >= c.committed_at
          WHERE change_id = ?
-           AND (t.rnk IS NULL OR t.rnk = 1)
     }, undef, $change_id)->[0];
 }
 
@@ -502,27 +433,30 @@ sub change_offset_from_id {
     my $tscol  = sprintf $self->_ts2char_format, 'c.planned_at';
     my $tagcol = sprintf $self->_listagg_format, 't.tag';
 
+    # SQLite and CUBRID requires LIMIT when there is an OFFSET.
+    my $limit  = '';
+    if (my $lim = $self->_limit_default) {
+        $limit = "LIMIT $lim ";
+    }
     my $change = $self->dbh->selectrow_hashref(qq{
-        SELECT id, name, project, note, timestamp, planner_name, planner_email, tags
-          FROM (
-              SELECT id, name, project, note, timestamp, planner_name, planner_email, tags, rownum AS rnum
-                FROM (
-                  SELECT c.change_id AS id, c.change AS name, c.project, c.note,
-                         $tscol AS timestamp, c.planner_name, c.planner_email,
-                         $tagcol AS tags
-                    FROM changes   c
-                    LEFT JOIN tags t ON c.change_id = t.change_id
-                   WHERE c.project = ?
-                     AND c.committed_at $op (
-                         SELECT committed_at FROM changes WHERE change_id = ?
-                   )
-                   GROUP BY c.change_id, c.change, c.project, c.note, c.planned_at,
-                         c.planner_name, c.planner_email, c.committed_at
-                   ORDER BY c.committed_at $dir
-              )
-         ) WHERE rnum = ?
-    }, undef, $self->plan->project, $change_id, abs $offset) || return undef;
+        SELECT c.change_id AS id, c.change_name AS name, c.project, c.note,
+               $tscol AS timestamp, c.planner_name, c.planner_email,
+               $tagcol AS tags
+          FROM changes   c
+          LEFT JOIN tags t ON c.change_id = t.change_id
+         WHERE c.project = ?
+           AND c.committed_at $op (
+               SELECT committed_at FROM changes WHERE change_id = ?
+         )
+         GROUP BY c.change_id, c.change_name, c.project, c.note, c.planned_at,
+               c.planner_name, c.planner_email, c.committed_at
+         ORDER BY c.committed_at $dir
+         ${limit}OFFSET ?
+    }, undef, $self->plan->project, $change_id, abs($offset) - 1) || return undef;
     $change->{timestamp} = _dt $change->{timestamp};
+    unless (ref $change->{tags}) {
+        $change->{tags} = $change->{tags} ? [ split / / => $change->{tags} ] : [];
+    }
     return $change;
 }
 
@@ -536,16 +470,17 @@ sub is_deployed_tag {
 
 sub initialize {
     my $self   = shift;
+    print "Initializing...\n";
     hurl engine => __x(
         'Sqitch database {database} already initialized',
         database => $self->sqitch_db,
     ) if $self->initialized;
 
     # Load up our database.
+    my @cmd = $self->csql;
+    $cmd[-1] = $self->sqitch_db;
     my $file = file(__FILE__)->dir->file('cubrid.sql');
-    $self->_run( '--input-file' => $file, $self->sqitch_db );
-
-    return $self;               # ???
+    $self->sqitch->run( @cmd, '--input-file' => $file );
 }
 
 # Override for special handling of regular the expression operator and
@@ -566,7 +501,7 @@ sub search_events {
     for my $spec (
         [ committer => 'committer_name' ],
         [ planner   => 'planner_name'   ],
-        [ change    => 'change'         ],
+        [ change    => 'change_name'         ],
         [ project   => 'project'        ],
     ) {
         my $regex = delete $p{ $spec->[0] } // next;
@@ -599,7 +534,7 @@ sub search_events {
         SELECT event
              , project
              , change_id
-             , change
+             , change_name
              , note
              , requires
              , conflicts
@@ -649,71 +584,149 @@ sub begin_work {
 
     # Start transaction and lock changes to allow only one change at a time.
     $dbh->begin_work;
-    $dbh->do('LOCK TABLE changes IN EXCLUSIVE MODE');
+    #$dbh->do('LOCK TABLE changes IN EXCLUSIVE MODE');??? howto ???
     return $self;
 }
 
-sub run_file {
-    my ($self, $file) = @_;
-    $self->_run('--input-file' => $file);
-}
-
-sub run_verify {
-    my $self = shift;
-    (my $file = shift) =~ s/"/""/g;
-    # Suppress STDOUT unless we want extra verbosity.
-    my $meth = $self->can($self->sqitch->verbosity > 1 ? '_run' : '_capture');
-    $self->$meth(qq{\@"$file"});
-}
-
-sub run_handle {
-    my ($self, $fh) = @_;
-    my $target = $self->_script;
-    open my $tfh, '<:utf8_strict', \$target;
-    $self->sqitch->spool( [$tfh, $fh], $self->csql );
-}
-
-# Override to take advantage of the RETURNING expression, and to save tags as
-# an array rather than a space-delimited string.
-sub log_revert_change {
+sub log_deploy_change {
     my ($self, $change) = @_;
-    my $dbh = $self->dbh;
-    my $cid = $change->id;
+    my $dbh    = $self->dbh;
+    my $sqitch = $self->sqitch;
 
-    # Delete tags.
-    my $sth = $dbh->prepare(
-        'DELETE FROM tags WHERE change_id = ? RETURNING tag INTO ?',
-    );
-    $sth->bind_param(1, $cid);
-    $sth->bind_param_inout_array(2, my $del_tags = [], 0, {
-        ora_type => DBD::Cubrid::ORA_VARCHAR2()
-    });
-    $sth->execute;
-
-    # Retrieve dependencies.
-    my ($req, $conf) = $dbh->selectrow_array(q{
-        SELECT (
-            SELECT COLLECT(dependency)
-              FROM dependencies
-             WHERE change_id = ?
-               AND type = 'require'
-        ),
-        (
-            SELECT COLLECT(dependency)
-              FROM dependencies
-             WHERE change_id = ?
-               AND type = 'conflict'
-        ) FROM dual
-    }, undef, $cid, $cid);
-
-    # Delete the change record.
-    $dbh->do(
-        'DELETE FROM changes where change_id = ?',
-        undef, $change->id,
+    my ($id, $name, $proj, $user, $email) = (
+        $change->id,
+        $change->format_name,
+        $change->project,
+        $sqitch->user_name,
+        $sqitch->user_email
     );
 
-    # Log it.
-    return $self->_log_event( revert => $change, $del_tags, $req, $conf );
+    my $ts = $self->_ts_default;
+    $dbh->do(qq{
+        INSERT INTO changes (
+              change_id
+            , change_name
+            , project
+            , note
+            , committer_name
+            , committer_email
+            , planned_at
+            , planner_name
+            , planner_email
+            , committed_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, $ts)
+    }, undef,
+        $id,
+        $name,
+        $proj,
+        $change->note,
+        $user,
+        $email,
+        $self->_char2ts( $change->timestamp ),
+        $change->planner_name,
+        $change->planner_email,
+    );
+
+    if ( my @deps = $change->dependencies ) {
+        $dbh->do(q{
+            INSERT INTO dependencies(
+                  change_id
+                , type
+                , dependency
+                , dependency_id
+           ) } . $self->_multi_values(scalar @deps, '?, ?, ?, ?'),
+            undef,
+            map { (
+                $id,
+                $_->type,
+                $_->as_string,
+                $_->resolved_id,
+            ) } @deps
+        );
+    }
+
+    if ( my @tags = $change->tags ) {
+        $dbh->do(q{
+            INSERT INTO tags (
+                  tag_id
+                , tag
+                , project
+                , change_id
+                , note
+                , committer_name
+                , committer_email
+                , planned_at
+                , planner_name
+                , planner_email
+                , committed_at
+           ) } . $self->_multi_values(scalar @tags, "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, $ts"),
+            undef,
+            map { (
+                $_->id,
+                $_->format_name,
+                $proj,
+                $id,
+                $_->note,
+                $user,
+                $email,
+                $self->_char2ts( $_->timestamp ),
+                $_->planner_name,
+                $_->planner_email,
+            ) } @tags
+        );
+    }
+
+    return $self->_log_event( deploy => $change );
+}
+
+sub _log_event {
+    my ( $self, $event, $change, $tags, $requires, $conflicts) = @_;
+
+    # Can't insert SEQUENCE with parameteres?
+    # CUBRID DBMS Error : (-494) Semantic: Cannot coerce host var to type
+    # sequence.  at ... line ...
+    my $tg = $tags      || $self->_log_tags_param($change);
+    my $rq = $requires  || $self->_log_requires_param($change);
+    my $cf = $conflicts || $self->_log_conflicts_param($change);
+
+    my $dbh    = $self->dbh;
+    my $sqitch = $self->sqitch;
+
+    my $ts = $self->_ts_default;
+
+    $dbh->do(qq{
+        INSERT INTO events (
+              event
+            , change_id
+            , change_name
+            , project
+            , note
+            , tags
+            , requires
+            , conflicts
+            , committer_name
+            , committer_email
+            , planned_at
+            , planner_name
+            , planner_email
+            , committed_at
+        )
+        VALUES (?, ?, ?, ?, ?, $tg, $rq, $cf, ?, ?, ?, ?, ?, $ts)
+    }, undef,
+        $event,
+        $change->id,
+        $change->name,
+        $change->project,
+        $change->note,
+        $sqitch->user_name,
+        $sqitch->user_email,
+        $self->_char2ts( $change->timestamp ),
+        $change->planner_name,
+        $change->planner_email,
+    );
+
+    return $self;
 }
 
 sub _ts2char($) {
@@ -722,55 +735,40 @@ sub _ts2char($) {
 }
 
 sub _no_table_error  {
-    return defined $DBI::err && $DBI::err == 942; # ORA-00942: table or view does not exist
-}
-
-sub _script {
-    my $self   = shift;
-    my $target = $self->user // '';
-    if (my $pass = $self->password) {
-        $pass =~ s/"/""/g;
-        $target .= qq{/"$pass"};
-    }
-    if (my $db = $self->db_name) {
-        $target .= '@';
-        $db =~ s/"/""/g;
-        if ($self->host || $self->port) {
-            $target .= '//' . ($self->host || '');
-            if (my $port = $self->port) {
-                $target .= ":$port";
-            }
-            $target .= qq{/"$db"};
-        } else {
-            $target .= qq{"$db"};
-        }
-    }
-    my %vars = $self->variables;
-
-    return join "\n" => (
-        'SET ECHO OFF NEWP 0 SPA 0 PAGES 0 FEED OFF HEAD OFF TRIMS ON TAB OFF',
-        'WHENEVER OSERROR EXIT 9;',
-        'WHENEVER SQLERROR EXIT SQL.SQLCODE;',
-        (map {; (my $v = $vars{$_}) =~ s/"/""/g; qq{DEFINE $_="$v"} } sort keys %vars),
-        "connect $target",
-        @_
-    );
+    return defined $DBI::err && $DBI::err == -20001; # a generic error?
 }
 
 sub _run {
     my $self   = shift;
-    my $sqitch = $self->sqitch;
-    my $pass   = $self->password or return $sqitch->run( $self->csql, @_ );
-    #local $ENV{PGPASSWORD} = $pass;
-    return $sqitch->run( $self->csql, @_ );
+    return $self->sqitch->run( $self->csql, @_ );
 }
 
 sub _capture {
     my $self   = shift;
-    my $sqitch = $self->sqitch;
-    my $pass   = $self->password or return $sqitch->capture( $self->csql, @_ );
-    #local $ENV{PGPASSWORD} = $pass;
-    return $sqitch->capture( $self->csql, @_ );
+    return $self->sqitch->capture( $self->csql, @_ );
+}
+
+sub _spool {
+    my $self   = shift;
+    my $fh     = shift;
+    return $self->sqitch->spool( $fh, $self->sqlite3, @_ );
+}
+
+sub run_file {
+    my ($self, $file) = @_;
+    $self->_run('--input-file' => $file);
+}
+
+sub run_verify {
+    my ($self, $file) = @_;
+    # Suppress STDOUT unless we want extra verbosity.
+    my $meth = $self->can($self->sqitch->verbosity > 1 ? '_run' : '_capture');
+    $self->$meth( '--input-file ' . $self->dbh->quote($file) );
+}
+
+sub run_handle {
+    my ($self, $fh) = @_;
+    $self->_spool($fh);
 }
 
 __PACKAGE__->meta->make_immutable;

@@ -2,6 +2,7 @@
 
 /*
  * Differences from Pg and Oracle:
+ *  - No schema|namespace support like in Pg
  *  - No TIME ZONE in CUBRID, only plain TIMESTAMP type (v <= 9.1.0)
  *  - Array -> LIST ( = SEQUENCE )
  *    http://www.cubrid.org/manual/90/en/LIST|SEQUENCE
@@ -108,9 +109,9 @@ CREATE TABLE events (
     change_name     VARCHAR(512)            NOT NULL,
     project         VARCHAR(512)            NOT NULL REFERENCES projects(project),
     note            VARCHAR(4000)           DEFAULT '',
-    requires        LIST (VARCHAR(512))     NOT NULL,
-    conflicts       LIST (VARCHAR(512))     NOT NULL,
-    tags            LIST (VARCHAR(512))     NOT NULL,
+    requires        SEQUENCE (VARCHAR(512)),
+    conflicts       SEQUENCE (VARCHAR(512)),
+    tags            SEQUENCE (VARCHAR(512)),
     committed_at    TIMESTAMP               DEFAULT CURRENT_TIMESTAMP NOT NULL,
     committer_name  VARCHAR(512)            NOT NULL,
     committer_email VARCHAR(512)            NOT NULL,
