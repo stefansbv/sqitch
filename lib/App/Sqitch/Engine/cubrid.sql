@@ -10,11 +10,11 @@
 */
 
 CREATE TABLE projects (
-    project         VARCHAR(512)       PRIMARY KEY,
-    uri             VARCHAR(512)       NULL UNIQUE,
+    project         STRING       PRIMARY KEY,
+    uri             STRING       NULL UNIQUE,
     created_at      TIMESTAMP          DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    creator_name    VARCHAR(512)       NOT NULL,
-    creator_email   VARCHAR(512)       NOT NULL
+    creator_name    STRING       NOT NULL,
+    creator_email   STRING       NOT NULL
 );
 
 /*
@@ -27,16 +27,16 @@ COMMENT ON COLUMN projects.creator_email  IS 'Email address of the user who adde
 */
 
 CREATE TABLE changes (
-    change_id       CHAR(40)        NOT NULL PRIMARY KEY,
-    change_name     VARCHAR(512)    NOT NULL,
-    project         VARCHAR(512)    NOT NULL REFERENCES projects(project),
-    note            VARCHAR(4000)   DEFAULT '',
-    committed_at    TIMESTAMP       DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    committer_name  VARCHAR(512)    NOT NULL,
-    committer_email VARCHAR(512)    NOT NULL,
-    planned_at      TIMESTAMP       NOT NULL,
-    planner_name    VARCHAR(512)    NOT NULL,
-    planner_email   VARCHAR(512)    NOT NULL
+    change_id       CHAR(40)  NOT NULL PRIMARY KEY,
+    change_name     STRING    NOT NULL,
+    project         STRING    NOT NULL REFERENCES projects(project),
+    note            STRING    DEFAULT '',
+    committed_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    committer_name  STRING    NOT NULL,
+    committer_email STRING    NOT NULL,
+    planned_at      TIMESTAMP NOT NULL,
+    planner_name    STRING    NOT NULL,
+    planner_email   STRING    NOT NULL
 );
 
 /*
@@ -54,17 +54,17 @@ COMMENT ON COLUMN changes.planner_email   IS 'Email address of the user who plan
 */
 
 CREATE TABLE tags (
-    tag_id          CHAR(40)           NOT NULL PRIMARY KEY,
-    tag             VARCHAR(512)       NOT NULL,
-    project         VARCHAR(512)       NOT NULL REFERENCES projects(project),
-    change_id       CHAR(40)           NOT NULL REFERENCES changes(change_id),
-    note            VARCHAR(4000)      DEFAULT '',
-    committed_at    TIMESTAMP          DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    committer_name  VARCHAR(512)       NOT NULL,
-    committer_email VARCHAR(512)       NOT NULL,
-    planned_at      TIMESTAMP          NOT NULL,
-    planner_name    VARCHAR(512)       NOT NULL,
-    planner_email   VARCHAR(512)       NOT NULL,
+    tag_id          CHAR(40)     NOT NULL PRIMARY KEY,
+    tag             STRING       NOT NULL,
+    project         STRING       NOT NULL REFERENCES projects(project),
+    change_id       CHAR(40)     NOT NULL REFERENCES changes(change_id),
+    note            STRING       DEFAULT '',
+    committed_at    TIMESTAMP    DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    committer_name  STRING       NOT NULL,
+    committer_email STRING       NOT NULL,
+    planned_at      TIMESTAMP    NOT NULL,
+    planner_name    STRING       NOT NULL,
+    planner_email   STRING       NOT NULL,
     UNIQUE(project, tag)
 );
 
@@ -84,10 +84,11 @@ COMMENT ON COLUMN tags.planner_email   IS 'Email address of the user who planned
 */
 
 CREATE TABLE dependencies (
-    change_id       CHAR(40)       NOT NULL REFERENCES changes(change_id) ON DELETE CASCADE,
-    type            VARCHAR(8)     NOT NULL,
-    dependency      VARCHAR(1024)  NOT NULL,
-    dependency_id   CHAR(40)       NULL REFERENCES changes(change_id),
+    change_id       CHAR(40)    NOT NULL
+                    REFERENCES changes(change_id) ON DELETE CASCADE,
+    type            VARCHAR(8)  NOT NULL,
+    dependency      STRING      NOT NULL,
+    dependency_id   CHAR(40)    NULL REFERENCES changes(change_id),
     CHECK (
             (type = 'require'  AND dependency_id IS NOT NULL)
          OR (type = 'conflict' AND dependency_id IS NULL)
@@ -104,20 +105,20 @@ COMMENT ON COLUMN dependencies.dependency_id IS 'Change ID the dependency resolv
 */
 
 CREATE TABLE events (
-    event           VARCHAR(6)              NOT NULL CHECK (event IN ('deploy', 'revert', 'fail')),
-    change_id       CHAR(40)                NOT NULL,
-    change_name     VARCHAR(512)            NOT NULL,
-    project         VARCHAR(512)            NOT NULL REFERENCES projects(project),
-    note            VARCHAR(4000)           DEFAULT '',
+    event           VARCHAR(6)        NOT NULL CHECK (event IN ('deploy', 'revert', 'fail')),
+    change_id       CHAR(40)          NOT NULL,
+    change_name     STRING            NOT NULL,
+    project         STRING            NOT NULL REFERENCES projects(project),
+    note            STRING            DEFAULT '',
     requires        SEQUENCE (VARCHAR(512)),
     conflicts       SEQUENCE (VARCHAR(512)),
     tags            SEQUENCE (VARCHAR(512)),
-    committed_at    TIMESTAMP               DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    committer_name  VARCHAR(512)            NOT NULL,
-    committer_email VARCHAR(512)            NOT NULL,
-    planned_at      TIMESTAMP               NOT NULL,
-    planner_name    VARCHAR(512)            NOT NULL,
-    planner_email   VARCHAR(512)            NOT NULL
+    committed_at    TIMESTAMP         DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    committer_name  STRING            NOT NULL,
+    committer_email STRING            NOT NULL,
+    planned_at      TIMESTAMP         NOT NULL,
+    planner_name    STRING            NOT NULL,
+    planner_email   STRING            NOT NULL
 );
 
 CREATE UNIQUE INDEX events_pkey ON events(change_id, committed_at);
