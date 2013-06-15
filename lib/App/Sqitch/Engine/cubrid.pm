@@ -5,11 +5,12 @@
 #  No TIME ZONE in CUBRID, only plain TIMESTAMP type (v <= 9.1.0)
 
 # Problems:
-#  tested only with CUBRID 9.1
 #  many tests are disabled
 #  LOCK TABLE changes IN EXCLUSIVE MODE? howto?
-#  Use of uninitialized value $replength in numeric gt ... from the log command
 #  Many other problems, probably :)
+
+# Notes:
+#  Tested only with CUBRID 9.1, failed to install DBD::cubrid in v8.4.3
 
 package App::Sqitch::Engine::cubrid;
 
@@ -154,7 +155,6 @@ has csql => (
                 if $self->host;
             push @ret, $db_name;
         }
-        #print "csql: @ret\n";
         return \@ret;
     },
 );
@@ -168,10 +168,6 @@ has dbh => (
         try { require DBD::cubrid } catch {
             hurl cubrid => __ 'DBD::cubrid module required to manage CUBRID' if $@;
         };
-
-        $self->sqitch_db || hurl cubrid => __(
-            'No database specified; use --db-name set "core.cubrid.db_name" via sqitch config'
-        );
 
         my $dsn = 'dbi:cubrid:' . join ';' => map {
             "$_->[0]=$_->[1]"
@@ -197,11 +193,18 @@ has dbh => (
     }
 );
 
-#???
-sub destination { shift->db_name; }
+# sub change_col { return 'c.change_name'; } why doesn't this work???
+has change_col => (
+    is       => 'ro',
+    isa      => 'Str',
+    lazy     => 0,
+    required => 1,
+    default  => 'change_name',
+);
 
-sub meta_destination { shift->sqitch_db; }
-#???
+sub destination { shift->db_name; }        #???
+
+sub meta_destination { shift->sqitch_db; } #???
 
 sub config_vars {
     return (
@@ -216,18 +219,18 @@ sub config_vars {
 }
 
 sub _log_tags_param {
-    my $str = join ',' => map { $_->format_name } $_[1]->tags;
-    return "{'" . $str . "'}";
+    my $str = join ',' => map { q{'} . $_->format_name . q{'} } $_[1]->tags;
+    return "{$str}";
 }
 
 sub _log_requires_param {
-    my $str = join ',' => map { $_->as_string } $_[1]->requires;
-    return "{'" . $str . "'}";
+    my $str = join ',' => map { q{'} . $_->as_string . q{'} } $_[1]->requires;
+    return "{$str}";
 }
 
 sub _log_conflicts_param {
-    my $str = join ',' => map { $_->as_string } $_[1]->conflicts;
-    return "{'" . $str . "'}";
+    my $str = join ',' => map { q{'} . $_->as_string . q{'} } $_[1]->conflicts;
+    return "{$str}";
 }
 
 sub _ts2char_format {
@@ -272,55 +275,40 @@ sub _cid {
     };
 }
 
-sub _cid_head {
-    my ($self, $project, $change) = @_;
-    return $self->dbh->selectcol_arrayref(qq{
-        SELECT change_id FROM (
-            SELECT change_id
-              FROM changes
-             WHERE project = ?
-               AND change_name  = ?
-             ORDER BY committed_at DESC
-        ) WHERE rownum = 1
-    }, undef, $project, $change)->[0];
-}
-
 sub current_state {
     my ( $self, $project ) = @_;
     my $cdtcol = sprintf $self->_ts2char_format, 'c.committed_at';
     my $pdtcol = sprintf $self->_ts2char_format, 'c.planned_at';
     my $tagcol = sprintf $self->_listagg_format, 't.tag';
+    my $chgcol = $self->change_col;
     my $dbh    = $self->dbh;
-    my $qproj  = $dbh->quote($project // $self->plan->project);
     my $state  = $dbh->selectrow_hashref(qq{
-        SELECT * FROM (
-            SELECT c.change_id
-                 , c.change_name
-                 , c.project
-                 , c.note
-                 , c.committer_name
-                 , c.committer_email
-                 , $cdtcol AS committed_at
-                 , c.planner_name
-                 , c.planner_email
-                 , $pdtcol AS planned_at
-                 , $tagcol AS tags
-              FROM changes   c
-              LEFT JOIN tags t ON c.change_id = t.change_id
-             WHERE c.project = $qproj
-             GROUP BY c.change_id
-                 , c.change_name
-                 , c.project
-                 , c.note
-                 , c.committer_name
-                 , c.committer_email
-                 , c.committed_at
-                 , c.planner_name
-                 , c.planner_email
-                 , c.planned_at
-             ORDER BY c.committed_at DESC
-        ) WHERE rownum = 1
-    }) or return undef;
+        SELECT c.change_id
+             , c.$chgcol AS [change]
+             , c.project
+             , c.note
+             , c.committer_name
+             , c.committer_email
+             , $cdtcol AS committed_at
+             , c.planner_name
+             , c.planner_email
+             , $pdtcol AS planned_at
+             , $tagcol AS tags
+          FROM changes   c
+          LEFT JOIN tags t ON c.change_id = t.change_id
+         WHERE c.project = ?
+         GROUP BY c.change_id
+             , $chgcol
+             , c.project
+             , c.note
+             , c.committer_name
+             , c.committer_email
+             , c.committed_at
+             , c.planner_name
+             , c.planner_email
+             , c.planned_at
+         ORDER BY c.committed_at DESC LIMIT 1
+    }, undef, $project // $self->plan->project ) or return undef;
     unless (ref $state->{tags}) {
         $state->{tags} = $state->{tags} ? [ split / / => $state->{tags} ] : [];
     }
@@ -333,6 +321,7 @@ sub deployed_changes {
     my $self   = shift;
     my $tscol  = sprintf $self->_ts2char_format, 'c.planned_at';
     my $tagcol = sprintf $self->_listagg_format, 't.tag';
+    my $chgcol = $self->change_col;
     return map {
         $_->{timestamp} = _dt $_->{timestamp};
         unless (ref $_->{tags}) {
@@ -340,13 +329,13 @@ sub deployed_changes {
         }
         $_;
     } @{ $self->dbh->selectall_arrayref(qq{
-        SELECT c.change_id AS id, c.change_name AS name, c.project, c.note,
+        SELECT c.change_id AS id, c.$chgcol AS name, c.project, c.note,
                $tscol AS [timestamp], c.planner_name, c.planner_email,
                $tagcol AS tags
           FROM changes   c
           LEFT JOIN tags t ON c.change_id = t.change_id
          WHERE c.project = ?
-         GROUP BY c.change_id, c.change_name, c.project, c.note, c.planned_at,
+         GROUP BY c.change_id, c.$chgcol, c.project, c.note, c.planned_at,
                c.planner_name, c.planner_email, c.committed_at
          ORDER BY c.committed_at ASC
     }, { Slice => {} }, $self->plan->project) };
@@ -357,14 +346,15 @@ sub load_change {
     my $tscol  = sprintf $self->_ts2char_format, 'c.planned_at';
     my $tagcol = sprintf $self->_listagg_format, 't.tag';
     my $qcid   = $self->dbh->quote($change_id);
+    my $chgcol = $self->change_col;
     my $change = $self->dbh->selectrow_hashref(qq{
-        SELECT c.change_id AS id, c.change_name AS name, c.project, c.note,
-               $tscol AS timestamp, c.planner_name, c.planner_email,
+        SELECT c.change_id AS id, c.$chgcol AS name, c.project, c.note,
+               $tscol AS [timestamp], c.planner_name, c.planner_email,
                 $tagcol AS tags
           FROM changes   c
           LEFT JOIN tags t ON c.change_id = t.change_id
          WHERE c.change_id = $qcid
-         GROUP BY c.change_id, c.change_name, c.project, c.note, c.planned_at,
+         GROUP BY c.change_id, c.$chgcol, c.project, c.note, c.planned_at,
                c.planner_name, c.planner_email
     }, undef) || return undef;
     $change->{timestamp} = _dt $change->{timestamp};
@@ -374,7 +364,7 @@ sub load_change {
 sub is_deployed_change {
     my ( $self, $change ) = @_;
     $self->dbh->selectcol_arrayref(
-        'SELECT 1 FROM changes WHERE change_id = ?',
+        q{SELECT 1 FROM changes WHERE change_id = ?},
         undef, $change->id
     )->[0];
 }
@@ -390,8 +380,9 @@ sub initialized {
 
 sub changes_requiring_change {
     my ( $self, $change ) = @_;
-    return @{ $self->dbh->selectall_arrayref(q{
-        SELECT c.change_id, c.project, c.change_name AS [change], (
+    my $chgcol = $self->change_col;
+    return @{ $self->dbh->selectall_arrayref(qq{
+        SELECT c.change_id, c.project, c.$chgcol AS [change], (
             SELECT tag
               FROM changes c2
               JOIN tags ON c2.change_id = tags.change_id
@@ -408,8 +399,9 @@ sub changes_requiring_change {
 
 sub name_for_change_id {
     my ( $self, $change_id ) = @_;
+    my $chgcol = $self->change_col;
     return $self->dbh->selectcol_arrayref(q{
-        SELECT change_name AS [change] || COALESCE((
+        SELECT $chgcol AS [change] || COALESCE((
             SELECT tag
               FROM changes c2
               JOIN tags ON c2.change_id = tags.change_id
@@ -433,13 +425,15 @@ sub change_offset_from_id {
     my $tscol  = sprintf $self->_ts2char_format, 'c.planned_at';
     my $tagcol = sprintf $self->_listagg_format, 't.tag';
 
+    my $chgcol = $self->change_col;
+
     # SQLite and CUBRID requires LIMIT when there is an OFFSET.
     my $limit  = '';
     if (my $lim = $self->_limit_default) {
         $limit = "LIMIT $lim ";
     }
     my $change = $self->dbh->selectrow_hashref(qq{
-        SELECT c.change_id AS id, c.change_name AS name, c.project, c.note,
+        SELECT c.change_id AS id, c.$chgcol AS name, c.project, c.note,
                $tscol AS timestamp, c.planner_name, c.planner_email,
                $tagcol AS tags
           FROM changes   c
@@ -448,7 +442,7 @@ sub change_offset_from_id {
            AND c.committed_at $op (
                SELECT committed_at FROM changes WHERE change_id = ?
          )
-         GROUP BY c.change_id, c.change_name, c.project, c.note, c.planned_at,
+         GROUP BY c.change_id, c.$chgcol, c.project, c.note, c.planned_at,
                c.planner_name, c.planner_email, c.committed_at
          ORDER BY c.committed_at $dir
          ${limit}OFFSET ?
@@ -463,14 +457,13 @@ sub change_offset_from_id {
 sub is_deployed_tag {
     my ( $self, $tag ) = @_;
     return $self->dbh->selectcol_arrayref(
-        'SELECT 1 FROM tags WHERE tag_id = ?',
+        q{SELECT 1 FROM tags WHERE tag_id = ?},
         undef, $tag->id
     )->[0];
 }
 
 sub initialize {
     my $self   = shift;
-    print "Initializing...\n";
     hurl engine => __x(
         'Sqitch database {database} already initialized',
         database => $self->sqitch_db,
@@ -483,8 +476,6 @@ sub initialize {
     $self->sqitch->run( @cmd, '--input-file' => $file );
 }
 
-# Override for special handling of regular the expression operator and
-# LIMIT/OFFSET.
 sub search_events {
     my ( $self, %p ) = @_;
 
@@ -498,14 +489,15 @@ sub search_events {
 
     # Limit with regular expressions?
     my (@wheres, @params);
+    my $op = $self->_regex_op;
     for my $spec (
         [ committer => 'committer_name' ],
         [ planner   => 'planner_name'   ],
-        [ change    => 'change_name'         ],
+        [ change    => 'change'         ],
         [ project   => 'project'        ],
     ) {
         my $regex = delete $p{ $spec->[0] } // next;
-        push @wheres => "REGEXP_LIKE($spec->[1], ?)";
+        push @wheres => "$spec->[1] $op ?";
         push @params => $regex;
     }
 
@@ -522,7 +514,23 @@ sub search_events {
         : '';
 
     # Handle remaining parameters.
-    my ($lim, $off) = (delete $p{limit}, delete $p{offset});
+    my $limits = '';
+    if (exists $p{limit} || exists $p{offset}) {
+        my $lim = delete $p{limit};
+        if ($lim) {
+            $limits = "\n         LIMIT ?";
+            push @params => $lim;
+        }
+        if (my $off = delete $p{offset}) {
+            if (!$lim && ($lim = $self->_limit_default)) {
+                # SQLite requires LIMIT when OFFSET is set.
+                $limits = "\n         LIMIT ?";
+                push @params => $lim;
+            }
+            $limits .= "\n         OFFSET ?";
+            push @params => $off;
+        }
+    }
 
     hurl 'Invalid parameters passed to search_events(): '
         . join ', ', sort keys %p if %p;
@@ -530,11 +538,12 @@ sub search_events {
     # Prepare, execute, and return.
     my $cdtcol = sprintf $self->_ts2char_format, 'committed_at';
     my $pdtcol = sprintf $self->_ts2char_format, 'planned_at';
-    my $sql = qq{
+    my $chgcol = $self->change_col;
+    my $sth = $self->dbh->prepare(qq{
         SELECT event
              , project
              , change_id
-             , change_name
+             , $chgcol AS [change]
              , note
              , requires
              , conflicts
@@ -546,30 +555,11 @@ sub search_events {
              , planner_email
              , $pdtcol AS planned_at
           FROM events$where
-         ORDER BY events.committed_at $dir
-    };
-
-    if ($lim || $off) {
-        my @limits;
-        if ($lim) {
-            $off //= 0;
-            push @params => $lim + $off;
-            push @limits => 'rnum <= ?';
-        }
-        if ($off) {
-            push @params => $off;
-            push @limits => 'rnum > ?';
-        }
-
-        $sql = "SELECT * FROM ( SELECT ROWNUM AS rnum, i.* FROM ($sql) i ) WHERE "
-            . join ' AND ', @limits;
-    }
-
-    my $sth = $self->dbh->prepare($sql);
+         ORDER BY events.committed_at $dir$limits
+    });
     $sth->execute(@params);
     return sub {
         my $row = $sth->fetchrow_hashref or return;
-        delete $row->{rnum};
         $row->{committed_at} = _dt $row->{committed_at};
         $row->{planned_at}   = _dt $row->{planned_at};
         return $row;
@@ -592,6 +582,7 @@ sub log_deploy_change {
     my ($self, $change) = @_;
     my $dbh    = $self->dbh;
     my $sqitch = $self->sqitch;
+    my $chgcol = $self->change_col;
 
     my ($id, $name, $proj, $user, $email) = (
         $change->id,
@@ -605,7 +596,7 @@ sub log_deploy_change {
     $dbh->do(qq{
         INSERT INTO changes (
               change_id
-            , change_name
+            , $chgcol
             , project
             , note
             , committer_name
@@ -690,7 +681,7 @@ sub _log_event {
     my $tg = $tags      || $self->_log_tags_param($change);
     my $rq = $requires  || $self->_log_requires_param($change);
     my $cf = $conflicts || $self->_log_conflicts_param($change);
-
+    my $chgcol = $self->change_col;
     my $dbh    = $self->dbh;
     my $sqitch = $self->sqitch;
 
@@ -700,7 +691,7 @@ sub _log_event {
         INSERT INTO events (
               event
             , change_id
-            , change_name
+            , $chgcol
             , project
             , note
             , tags
@@ -752,7 +743,7 @@ sub _capture {
 sub _spool {
     my $self   = shift;
     my $fh     = shift;
-    return $self->sqitch->spool( $fh, $self->sqlite3, @_ );
+    return $self->sqitch->spool( $fh, $self->csql, @_ );
 }
 
 sub run_file {
@@ -764,7 +755,7 @@ sub run_verify {
     my ($self, $file) = @_;
     # Suppress STDOUT unless we want extra verbosity.
     my $meth = $self->can($self->sqitch->verbosity > 1 ? '_run' : '_capture');
-    $self->$meth( '--input-file ' . $self->dbh->quote($file) );
+    $self->$meth( '--input-file' => $file );
 }
 
 sub run_handle {

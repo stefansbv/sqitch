@@ -21,6 +21,13 @@ requires '_char2ts';
 requires '_listagg_format';
 requires '_no_table_error';
 
+has change_col => (
+    is       => 'ro',
+    isa      => 'Str',
+    required => 1,
+    default  => 'change',
+);
+
 sub _dt($) {
     require App::Sqitch::DateTime;
     return App::Sqitch::DateTime->new(split /:/ => shift);
@@ -80,10 +87,11 @@ sub current_state {
     my $cdtcol = sprintf $self->_ts2char_format, 'c.committed_at';
     my $pdtcol = sprintf $self->_ts2char_format, 'c.planned_at';
     my $tagcol = sprintf $self->_listagg_format, 't.tag';
+    my $chgcol = $self->change_col;
     my $dbh    = $self->dbh;
     my $state  = $dbh->selectrow_hashref(qq{
         SELECT c.change_id
-             , c.change
+             , c.$chgcol
              , c.project
              , c.note
              , c.committer_name
@@ -97,7 +105,7 @@ sub current_state {
           LEFT JOIN tags t ON c.change_id = t.change_id
          WHERE c.project = ?
          GROUP BY c.change_id
-             , c.change
+             , c.$chgcol
              , c.project
              , c.note
              , c.committer_name
@@ -121,9 +129,10 @@ sub current_changes {
     my ( $self, $project ) = @_;
     my $cdtcol = sprintf $self->_ts2char_format, 'committed_at';
     my $pdtcol = sprintf $self->_ts2char_format, 'planned_at';
+    my $chgcol = $self->change_col;
     my $sth    = $self->dbh->prepare(qq{
         SELECT change_id
-             , change
+             , $chgcol
              , committer_name
              , committer_email
              , $cdtcol AS committed_at
@@ -231,11 +240,12 @@ sub search_events {
     # Prepare, execute, and return.
     my $cdtcol = sprintf $self->_ts2char_format, 'committed_at';
     my $pdtcol = sprintf $self->_ts2char_format, 'planned_at';
+    my $chgcol = $self->change_col;
     my $sth = $self->dbh->prepare(qq{
         SELECT event
              , project
              , change_id
-             , change
+             , $chgcol
              , note
              , requires
              , conflicts
@@ -368,7 +378,7 @@ sub log_deploy_change {
     my ($self, $change) = @_;
     my $dbh    = $self->dbh;
     my $sqitch = $self->sqitch;
-
+    my $chgcol = $self->change_col;
     my ($id, $name, $proj, $user, $email) = (
         $change->id,
         $change->format_name,
@@ -381,7 +391,7 @@ sub log_deploy_change {
     $dbh->do(qq{
         INSERT INTO changes (
               change_id
-            , change
+            , $chgcol
             , project
             , note
             , committer_name
@@ -464,6 +474,7 @@ sub _log_event {
     my ( $self, $event, $change, $tags, $requires, $conflicts) = @_;
     my $dbh    = $self->dbh;
     my $sqitch = $self->sqitch;
+    my $chgcol = $self->change_col;
 
     my $ts = $self->_ts_default;
 
@@ -471,7 +482,7 @@ sub _log_event {
         INSERT INTO events (
               event
             , change_id
-            , change
+            , $chgcol
             , project
             , note
             , tags
@@ -506,8 +517,9 @@ sub _log_event {
 
 sub changes_requiring_change {
     my ( $self, $change ) = @_;
-    return @{ $self->dbh->selectall_arrayref(q{
-        SELECT c.change_id, c.project, c.change, (
+    my $chgcol = $self->change_col;
+    return @{ $self->dbh->selectall_arrayref(qq{
+        SELECT c.change_id, c.project, c.$chgcol AS change, (
             SELECT tag
               FROM changes c2
               JOIN tags ON c2.change_id = tags.change_id
@@ -642,6 +654,7 @@ sub deployed_changes {
     my $self   = shift;
     my $tscol  = sprintf $self->_ts2char_format, 'c.planned_at';
     my $tagcol = sprintf $self->_listagg_format, 't.tag';
+    my $chgcol = $self->change_col;
     return map {
         $_->{timestamp} = _dt $_->{timestamp};
         unless (ref $_->{tags}) {
@@ -649,13 +662,13 @@ sub deployed_changes {
         }
         $_;
     } @{ $self->dbh->selectall_arrayref(qq{
-        SELECT c.change_id AS id, c.change AS name, c.project, c.note,
+        SELECT c.change_id AS id, c.$chgcol AS name, c.project, c.note,
                $tscol AS timestamp, c.planner_name, c.planner_email,
                $tagcol AS tags
           FROM changes   c
           LEFT JOIN tags t ON c.change_id = t.change_id
          WHERE c.project = ?
-         GROUP BY c.change_id, c.change, c.project, c.note, c.planned_at,
+         GROUP BY c.change_id, c.$chgcol, c.project, c.note, c.planned_at,
                c.planner_name, c.planner_email, c.committed_at
          ORDER BY c.committed_at ASC
     }, { Slice => {} }, $self->plan->project) };
@@ -665,6 +678,7 @@ sub deployed_changes_since {
     my ( $self, $change ) = @_;
     my $tscol  = sprintf $self->_ts2char_format, 'c.planned_at';
     my $tagcol = sprintf $self->_listagg_format, 't.tag';
+    my $chgcol = $self->change_col;
     return map {
         $_->{timestamp} = _dt $_->{timestamp};
         unless (ref $_->{tags}) {
@@ -672,14 +686,14 @@ sub deployed_changes_since {
         }
         $_;
     } @{ $self->dbh->selectall_arrayref(qq{
-        SELECT c.change_id AS id, c.change AS name, c.project, c.note,
+        SELECT c.change_id AS id, c.$chgcol AS name, c.project, c.note,
                $tscol AS timestamp, c.planner_name, c.planner_email,
                $tagcol AS tags
           FROM changes   c
           LEFT JOIN tags t ON c.change_id = t.change_id
          WHERE c.project = ?
            AND c.committed_at > (SELECT committed_at FROM changes WHERE change_id = ?)
-         GROUP BY c.change_id, c.change, c.project, c.note, c.planned_at,
+         GROUP BY c.change_id, c.$chgcol, c.project, c.note, c.planned_at,
                c.planner_name, c.planner_email, c.committed_at
          ORDER BY c.committed_at ASC
     }, { Slice => {} }, $self->plan->project, $change->id) };
@@ -689,14 +703,15 @@ sub load_change {
     my ( $self, $change_id ) = @_;
     my $tscol  = sprintf $self->_ts2char_format, 'c.planned_at';
     my $tagcol = sprintf $self->_listagg_format, 't.tag';
+    my $chgcol = $self->change_col;
     my $change = $self->dbh->selectrow_hashref(qq{
-        SELECT c.change_id AS id, c.change AS name, c.project, c.note,
+        SELECT c.change_id AS id, c.$chgcol AS name, c.project, c.note,
                $tscol AS timestamp, c.planner_name, c.planner_email,
                 $tagcol AS tags
           FROM changes   c
           LEFT JOIN tags t ON c.change_id = t.change_id
          WHERE c.change_id = ?
-         GROUP BY c.change_id, c.change, c.project, c.note, c.planned_at,
+         GROUP BY c.change_id, c.$chgcol, c.project, c.note, c.planned_at,
                c.planner_name, c.planner_email
     }, undef, $change_id) || return undef;
     $change->{timestamp} = _dt $change->{timestamp};
@@ -717,13 +732,15 @@ sub change_offset_from_id {
     my $tscol  = sprintf $self->_ts2char_format, 'c.planned_at';
     my $tagcol = sprintf $self->_listagg_format, 't.tag';
 
+    my $chgcol = $self->change_col;
+
     # SQLite requires LIMIT when there is an OFFSET.
     my $limit  = '';
     if (my $lim = $self->_limit_default) {
         $limit = "LIMIT $lim ";
     }
     my $change = $self->dbh->selectrow_hashref(qq{
-        SELECT c.change_id AS id, c.change AS name, c.project, c.note,
+        SELECT c.change_id AS id, c.$chgcol AS name, c.project, c.note,
                $tscol AS timestamp, c.planner_name, c.planner_email,
                $tagcol AS tags
           FROM changes   c
@@ -732,7 +749,7 @@ sub change_offset_from_id {
            AND c.committed_at $op (
                SELECT committed_at FROM changes WHERE change_id = ?
          )
-         GROUP BY c.change_id, c.change, c.project, c.note, c.planned_at,
+         GROUP BY c.change_id, c.$chgcol, c.project, c.note, c.planned_at,
                c.planner_name, c.planner_email, c.committed_at
          ORDER BY c.committed_at $dir
          ${limit}OFFSET ?
@@ -746,11 +763,12 @@ sub change_offset_from_id {
 
 sub _cid_head {
     my ($self, $project, $change) = @_;
-    return $self->dbh->selectcol_arrayref(q{
+    my $chgcol = $self->change_col;
+    return $self->dbh->selectcol_arrayref(qq{
         SELECT change_id
           FROM changes
          WHERE project = ?
-           AND change  = ?
+           AND $chgcol = ?
          ORDER BY committed_at DESC
          LIMIT 1
     }, undef, $project, $change)->[0];
@@ -769,6 +787,8 @@ sub change_id_for {
         }, undef, $cid)->[0];
     }
 
+    my $chgcol = $self->change_col;
+
     my $project = $p{project} || $self->plan->project;
     if ( my $change = $p{change} ) {
         if ( my $tag = $p{tag} ) {
@@ -780,24 +800,24 @@ sub change_id_for {
                 if $tag eq 'HEAD' || $tag eq 'LAST';
 
             # Find by change name and following tag.
-            return $dbh->selectcol_arrayref(q{
+            return $dbh->selectcol_arrayref(qq{
                 SELECT changes.change_id
                   FROM changes
                   JOIN tags
                     ON changes.committed_at <= tags.committed_at
                    AND changes.project = tags.project
                  WHERE changes.project = ?
-                   AND changes.change  = ?
+                   AND changes.$chgcol = ?
                    AND tags.tag        = ?
             }, undef, $project, $change, '@' . $tag)->[0];
         }
 
         # Find by change name. Fail if there are multiple.
-        my $ids = $dbh->selectcol_arrayref(q{
+        my $ids = $dbh->selectcol_arrayref(qq{
             SELECT change_id
               FROM changes
              WHERE project = ?
-               AND change  = ?
+               AND $chgcol = ?
         }, undef, $project, $change);
         return $ids->[0] if @{ $ids } < 2;
         hurl engine => __x(
