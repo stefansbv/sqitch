@@ -220,25 +220,25 @@ $mock_cub->mock(csql => sub { $^X, $echo, qw(hi there) });
 
 # ##############################################################################
 # Test file and handle running.
-# my @run;
+my @run;
 # $mock_cub->mock(_run => sub {shift; @run = @_ });
 # ok $cub->run_file('foo/bar.sql'), 'Run foo/bar.sql';
 # is_deeply \@run, [$cub->csql, '--input-file', 'foo/bar.sql'],
 #     'File should be passed to run()';
 
-# ok $cub->run_handle('FH'), 'Spool a "file handle"';
-# is_deeply \@spool, ['FH', $cub->csql],
-#     'Handle should be passed to spool()';
+ok $cub->run_handle('FH'), 'Spool a "file handle"';
+is_deeply \@spool, ['FH', $cub->csql],
+    'Handle should be passed to spool()';
 
-# # Verify should go to capture unless verosity is > 1.
+# Verify should go to capture unless verosity is > 1.
 # ok $cub->run_verify('foo/bar.sql'), 'Verify foo/bar.sql';
-# is_deeply \@capture, [$cub->csql, '--file', 'foo/bar.sql'],
+# is_deeply \@capture, [$cub->csql, '--input-file', 'foo/bar.sql'],
 #     'Verify file should be passed to capture()';
 
 # $mock_sqitch->mock(verbosity => 2);
 # ok $cub->run_verify('foo/bar.sql'), 'Verify foo/bar.sql again';
-# is_deeply \@run, [$cub->csql, '--file', 'foo/bar.sql'],
-#     'Verifile file should be passed to run() for high verbosity';
+# is_deeply \@run, [$cub->csql, '--input-file', 'foo/bar.sql'],
+#     'Verify file should be passed to run() for high verbosity';
 
 $mock_sqitch->unmock_all;
 $mock_config->unmock_all;
@@ -262,54 +262,61 @@ is $dt->minute,  7, 'DateTime minute should be set';
 is $dt->second,  1, 'DateTime second should be set';
 is $dt->time_zone->name, 'UTC', 'DateTime TZ should be set';
 
-# ##############################################################################
+##############################################################################
 # Can we do live tests?
-# Maybe, but there is no CREATE DATABASE command AFAIK
-# my $dbh;
-# END {
-#     return unless $dbh;
-#     $dbh->{Driver}->visit_child_handles(sub {
-#         my $h = shift;
-#         $h->disconnect if $h->{Type} eq 'db' && $h->{Active} && $h ne $dbh;
-#     });
+my $dbh;
+END {
+    return unless $dbh;
+    $dbh->{Driver}->visit_child_handles(sub {
+        my $h = shift;
+        $h->disconnect if $h->{Type} eq 'db' && $h->{Active} && $h ne $dbh;
+    });
 
-#     $dbh->do('DROP DATABASE __sqitchtest__') if $dbh->{Active};
-# }
+    $dbh->{RaiseError} = 0;
+    $dbh->{PrintError} = 1;
+    $dbh->do($_) for (
+        'DROP TABLE events',
+        'DROP TABLE dependencies',
+        'DROP TABLE tags',
+        'DROP TABLE changes',
+        'DROP TABLE projects',
+        'DROP TYPE  sqitch_array',
+    );
+}
 
-# my $err = try {
-#     $dbh = DBI->connect('dbi:cubrid:database=__sqitchtest__', 'dba', '', {
-#         PrintError => 0,
-#         RaiseError => 1,
-#         AutoCommit => 1,
-#     });
-#     $dbh->do('CREATE DATABASE __sqitchtest__');
-#     undef;
-# } catch {
-#     eval { $_->message } || $_;
-# };
+my $user = $ENV{CUBUSER} || 'dba';
+my $pass = $ENV{CUBPASS} || '';
+my $err = try {
+    my $dsn = 'dbi:cubrid:database=sqitch_test';
+    $dbh = DBI->connect($dsn, $user, $pass, {
+        PrintError => 0,
+        RaiseError => 1,
+        AutoCommit => 1,
+    });
+    undef;
+} catch {
+    eval { $_->message } || $_;
+};
 
-# DBIEngineTest->run(
-#     class         => $CLASS,
-#     sqitch_params => [
-#         db_user     => 'dba',
-#         db_name     => '__sqitchtest__',
-#         top_dir     => Path::Class::dir(qw(t engine)),
-#         plan_file   => Path::Class::file(qw(t engine sqitch.plan)),
-#     ],
-#     engine_params     => [],
-#     alt_engine_params => [ sqitch_schema => '__sqitchtest__' ],
-#     skip_unless       => sub {
-#         my $self = shift;
-#         die $err if $err;
-#         # Make sure we have csql and can connect to the database.
-#         $self->sqitch->probe( $self->client, '--version' );
-#         $self->_capture('--command' => 'SELECT version()');
-#     },
-#     engine_err_regex  => qr/^ERROR:  /,
-#     init_error        => __x(
-#         'Sqitch schema "{schema}" already exists',
-#         schema => '__sqitchtest',
-#     ),
-# );
+DBIEngineTest->run(
+    class         => $CLASS,
+    sqitch_params => [
+        db_username => $user,
+        db_name     => 'sqitch_test',
+        top_dir     => Path::Class::dir(qw(t engine)),
+        plan_file   => Path::Class::file(qw(t engine sqitch.plan)),
+    ],
+    engine_params     => [ password => $pass ],
+    alt_engine_params => [ password => $pass ],
+    skip_unless       => sub {
+        my $self = shift;
+        die $err if $err;
+        # Make sure we have csql and can connect to the database.
+        $self->sqitch->probe( $self->client, '-c SELECT 1', 'sqitch_test');
+        $self->_capture('SELECT 1 FROM dual;');
+    },
+    engine_err_regex  => qr/^ORA-00925: /,
+    init_error        => __ 'Sqitch already initialized',
+);
 
 done_testing;
