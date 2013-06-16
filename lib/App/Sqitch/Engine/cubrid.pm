@@ -193,14 +193,7 @@ has dbh => (
     }
 );
 
-# sub change_col { return 'c.change_name'; } why doesn't this work???
-has change_col => (
-    is       => 'ro',
-    isa      => 'Str',
-    lazy     => 0,
-    required => 1,
-    default  => 'change_name',
-);
+has '+change_col' => ( default  => 'change_name' );
 
 sub destination { shift->db_name; }        #???
 
