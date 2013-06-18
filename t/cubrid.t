@@ -83,8 +83,9 @@ isa_ok $cub = $CLASS->new(
 ), $CLASS;
 
 ##############################################################################
-# Test other configs for the destination.? No default env vars other
-# than $ENV{CUBRID} (the cubrid home instllation dir).
+# Test other configs for the destination?
+# No default env vars other # than $ENV{CUBRID} (the cubrid home
+# installation dir).
 # ENV: {
 #     Make sure we override system-set vars.
 #     local $ENV{PGDATABASE};
@@ -180,65 +181,50 @@ is_deeply [$cub->csql], [qw(
 )], 'csql command should be as optioned';
 
 ##############################################################################
-# Test _run() and _capture().                             from oracle.t...???
-can_ok $cub, qw(_run _capture);
+# Test _run(), _capture(), and _spool().
+can_ok $cub, qw(_run _capture _spool);
 my $mock_sqitch = Test::MockModule->new('App::Sqitch');
-my (@capture, @spool);
-$mock_sqitch->mock(spool   => sub { shift; @spool = @_ });
-my $mock_run3 = Test::MockModule->new('IPC::Run3');
-$mock_run3->mock(run3 => sub { @capture = @_ });
+my ( @run, $exp_pass );
+$mock_sqitch->mock( run => sub { shift; @run = @_; });
 
-# ok $cub->_run(qw(foo bar baz)), 'Call _run';
-# my $fh = shift @spool;
-# is_deeply \@spool, [$cub->csql],
-#     'csql command should be passed to spool()';
+my @capture;
+$mock_sqitch->mock(capture => sub { shift; @capture = @_; });
 
-# is join('', <$fh> ), $cub->_script(qw(foo bar baz)),
-#     'The script should be spooled';
+my @spool;
+$mock_sqitch->mock(spool => sub { shift; @spool = @_; });
 
-# ok $cub->_capture(qw(foo bar baz)), 'Call _capture';
-# is_deeply \@capture, [[$cub->csql], \$cub->_script(qw(foo bar baz)), []],
-#     'Command and script should be passed to run3()';
+$exp_pass = 's3cr3t';
+ok $cub->_run(qw(foo bar baz)), 'Call _run';
+is_deeply \@run, [$cub->csql, qw(foo bar baz)],
+    'Command should be passed to run()';
 
-# # Let's make sure that IPC::Run3 actually works as expected.
-$mock_run3->unmock_all;
-my $echo = Path::Class::file(qw(t echo.pl));
-my $mock_cub = Test::MockModule->new($CLASS);
-$mock_cub->mock(csql => sub { $^X, $echo, qw(hi there) });
+ok $cub->_spool('FH'), 'Call _spool';
+is_deeply \@spool, ['FH', $cub->csql],
+    'Command should be passed to spool()';
 
-# is join (', ' => $cub->_capture(qw(foo bar baz))), "hi there\n",
-#     '_capture should actually capture';
-
-# # Make it die.
-# my $die = Path::Class::file(qw(t die.pl));
-# $mock_cub->mock(csql => sub { $^X, $die, qw(hi there) });
-# like capture_stderr {
-#     throws_ok {
-#         $cub->_capture('whatever'),
-#     } 'App::Sqitch::X', '_capture should die when csql dies';
-# }, qr/^OMGWTF/, 'STDERR should be emitted by _capture';
+ok $cub->_capture(qw(foo bar baz)), 'Call _capture';
+is_deeply \@capture, [$cub->csql, qw(foo bar baz)],
+    'Command should be passed to capture()';
 
 # ##############################################################################
 # Test file and handle running.
-my @run;
-# $mock_cub->mock(_run => sub {shift; @run = @_ });
-# ok $cub->run_file('foo/bar.sql'), 'Run foo/bar.sql';
-# is_deeply \@run, [$cub->csql, '--input-file', 'foo/bar.sql'],
-#     'File should be passed to run()';
+ok $cub->run_file('foo/bar.sql'), 'Run foo/bar.sql';
+is_deeply \@run, [$cub->csql, '--input-file', 'foo/bar.sql'],
+    'File should be passed to run()';
 
 ok $cub->run_handle('FH'), 'Spool a "file handle"';
 is_deeply \@spool, ['FH', $cub->csql],
     'Handle should be passed to spool()';
 
 # Verify should go to capture unless verosity is > 1.
-# ok $cub->run_verify('foo/bar.sql'), 'Verify foo/bar.sql';
-# is_deeply \@capture, [$cub->csql, '--input-file', 'foo/bar.sql'],
-#     'Verify file should be passed to capture()';
+ok $cub->run_verify('foo/bar.sql'), 'Verify foo/bar.sql';
+is_deeply \@capture, [$cub->csql, '--input-file', 'foo/bar.sql'],
+    'Verify file should be passed to capture()';
 
-# $mock_sqitch->mock(verbosity => 2);
-# ok $cub->run_verify('foo/bar.sql'), 'Verify foo/bar.sql again';
-# is_deeply \@run, [$cub->csql, '--input-file', 'foo/bar.sql'],
-#     'Verify file should be passed to run() for high verbosity';
+$mock_sqitch->mock(verbosity => 2);
+ok $cub->run_verify('foo/bar.sql'), 'Verify foo/bar.sql again';
+is_deeply \@run, [$cub->csql, '--input-file', 'foo/bar.sql'],
+    'Verifile file should be passed to run() for high verbosity';
 
 $mock_sqitch->unmock_all;
 $mock_config->unmock_all;
@@ -287,7 +273,7 @@ END {
 my $user = $ENV{CUBUSER} || 'dba';
 my $pass = $ENV{CUBPASS} || '';
 my $err = try {
-    my $dsn = 'dbi:cubrid:database=sqitch_test';
+    my $dsn = 'dbi:cubrid:database=sqitchtest';
     $dbh = DBI->connect($dsn, $user, $pass, {
         PrintError => 0,
         RaiseError => 1,
@@ -298,25 +284,31 @@ my $err = try {
     eval { $_->message } || $_;
 };
 
+my $db_name = 'flipr';
+my $alt_db  = 'sqitchtest2';
+
 DBIEngineTest->run(
     class         => $CLASS,
     sqitch_params => [
         db_username => $user,
-        db_name     => 'sqitch_test',
+        db_name     => $db_name,
         top_dir     => Path::Class::dir(qw(t engine)),
         plan_file   => Path::Class::file(qw(t engine sqitch.plan)),
     ],
     engine_params     => [ password => $pass ],
-    alt_engine_params => [ password => $pass ],
+    alt_engine_params => [ password => $pass, db_name => $db_name, sqitch_db => $alt_db ],
     skip_unless       => sub {
         my $self = shift;
         die $err if $err;
         # Make sure we have csql and can connect to the database.
-        $self->sqitch->probe( $self->client, '-c SELECT 1', 'sqitch_test');
-        $self->_capture('SELECT 1 FROM dual;');
+        $self->sqitch->probe( $self->client, '--version' );
+        $self->_capture('--command' => 'SELECT version()');
     },
-    engine_err_regex  => qr/^ORA-00925: /,
-    init_error        => __ 'Sqitch already initialized',
+    engine_err_regex  => qr/^ERROR:  /,
+    init_error        =>  __x(
+        'Sqitch database {database} already initialized',
+        database => $alt_db,
+    ),
 );
 
 done_testing;
