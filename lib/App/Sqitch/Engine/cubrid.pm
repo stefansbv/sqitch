@@ -1,16 +1,25 @@
-# Differences from other engines:
-#  Pg Array -> CUBRID SEQUENCE
-#  CHANGE is a reserved word!: Col 'change' renamed to 'change_name'
-#  csql doesn't have a '--quiet' option
-#  No TIME ZONE in CUBRID, only plain TIMESTAMP type (v <= 9.1.0)
-
-# Problems:
-#  many tests are disabled
-#  LOCK TABLE changes IN EXCLUSIVE MODE? howto?
-#  Many other problems, probably :)
-
 # Notes:
 #  Tested only with CUBRID 9.1, failed to install DBD::cubrid in v8.4.3
+#  Differences from other engines:
+#   Pg Array -> CUBRID SEQUENCE
+#   CHANGE is a reserved word!: Col 'change' renamed to 'change_name'
+#   csql doesn't have a '--quiet' option
+#   No TIME ZONE in CUBRID, only plain TIMESTAMP type (v <= 9.1.0)
+
+# Problems:
+#  Some tests are disabled
+#  Some tests fail
+#  LOCK TABLE changes IN EXCLUSIVE MODE not implemented
+#  Many other problems, probably :)
+
+# Requirements for live testing:
+# Databases:
+# * sqitchmeta
+# * sqitchtest
+# * sqitchtest2
+# Environment variables:
+# * CUBUSER (optional, the default is 'dba')
+# * CUBPASS
 
 package App::Sqitch::Engine::cubrid;
 
@@ -183,6 +192,7 @@ has dbh => (
             PrintError        => 0,
             RaiseError        => 0,
             AutoCommit        => 1,
+            FetchHashKeyName  => 'NAME_lc',
             HandleError       => sub {
                 my ($err, $dbh) = @_;
                 $@ = $err;
@@ -421,6 +431,7 @@ sub change_offset_from_id {
     my $chgcol = $self->change_col;
 
     # SQLite and CUBRID requires LIMIT when there is an OFFSET.
+    # The OFFSET feature in CUBRID is from v9.0
     my $limit  = '';
     if (my $lim = $self->_limit_default) {
         $limit = "LIMIT $lim ";

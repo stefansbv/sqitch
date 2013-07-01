@@ -284,7 +284,7 @@ my $err = try {
     eval { $_->message } || $_;
 };
 
-my $db_name = 'flipr';
+my $db_name = 'sqitchtest';
 my $alt_db  = 'sqitchtest2';
 
 DBIEngineTest->run(
@@ -301,10 +301,12 @@ DBIEngineTest->run(
         my $self = shift;
         die $err if $err;
         # Make sure we have csql and can connect to the database.
-        $self->sqitch->probe( $self->client, '--version' );
+        # The version message is sent to STDERR
+        # $self->sqitch->probe( $self->client, '--version' );
+        # $self->_capture('--version'); # capture doesn't work
         $self->_capture('--command' => 'SELECT version()');
     },
-    engine_err_regex  => qr/^ERROR:  /,
+    engine_err_regex  => qr/^ERROR:/,
     init_error        =>  __x(
         'Sqitch database {database} already initialized',
         database => $alt_db,
