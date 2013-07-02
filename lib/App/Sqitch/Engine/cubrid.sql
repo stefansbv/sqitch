@@ -6,7 +6,7 @@
  *  - No TIME ZONE in CUBRID, only plain TIMESTAMP type (v <= 9.1.0)
  *  - Array -> LIST ( = SEQUENCE )
  *    http://www.cubrid.org/manual/90/en/LIST|SEQUENCE
- *  - CHANGE is a reserved word! -> Col 'change' renamed to 'change_name'
+ *  - CHANGE is a reserved word!
 */
 
 CREATE TABLE projects (
@@ -28,7 +28,7 @@ COMMENT ON COLUMN projects.creator_email  IS 'Email address of the user who adde
 
 CREATE TABLE changes (
     change_id       CHAR(40)   NOT NULL PRIMARY KEY,
-    change_name     STRING     NOT NULL,
+    "change"        STRING     NOT NULL,
     project         STRING     NOT NULL REFERENCES projects(project),
     note            STRING     DEFAULT '',
     committed_at    TIMESTAMP  DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -42,7 +42,7 @@ CREATE TABLE changes (
 /*
 COMMENT ON TABLE changes                  IS 'Tracks the changes currently deployed to the database.';
 COMMENT ON COLUMN changes.change_id       IS 'Change primary key.';
-COMMENT ON COLUMN changes.change_name     IS 'Name of a deployed change.';
+COMMENT ON COLUMN changes.change          IS 'Name of a deployed change.';
 COMMENT ON COLUMN changes.project         IS 'Name of the Sqitch project to which the change belongs.';
 COMMENT ON COLUMN changes.note            IS 'Description of the change.';
 COMMENT ON COLUMN changes.committed_at    IS 'Date the change was deployed.';
@@ -108,7 +108,7 @@ CREATE TABLE events (
     event           VARCHAR(6)  NOT NULL
                         CHECK (event IN ('deploy', 'revert', 'fail')),
     change_id       CHAR(40)    NOT NULL,
-    change_name     STRING      NOT NULL,
+    "change"        STRING      NOT NULL,
     project         STRING      NOT NULL REFERENCES projects(project),
     note            STRING      DEFAULT '',
     requires        SEQUENCE (VARCHAR(512)),
@@ -128,7 +128,7 @@ CREATE UNIQUE INDEX events_pkey ON events(change_id, committed_at);
 COMMENT ON TABLE events                  IS 'Contains full history of all deployment events.';
 COMMENT ON COLUMN events.event           IS 'Type of event.';
 COMMENT ON COLUMN events.change_id       IS 'Change ID.';
-COMMENT ON COLUMN events.change_name     IS 'Change name.';
+COMMENT ON COLUMN events.change          IS 'Change name.';
 COMMENT ON COLUMN events.project         IS 'Name of the Sqitch project to which the change belongs.';
 COMMENT ON COLUMN events.note            IS 'Description of the change.';
 COMMENT ON COLUMN events.requires        IS 'Array of the names of required changes.';

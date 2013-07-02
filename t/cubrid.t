@@ -306,7 +306,7 @@ DBIEngineTest->run(
         # $self->_capture('--version'); # capture doesn't work
         $self->_capture('--command' => 'SELECT version()');
     },
-    engine_err_regex  => qr/^ERROR:/,
+    engine_err_regex  => qr/ERROR:/,
     init_error        =>  __x(
         'Sqitch database {database} already initialized',
         database => $alt_db,
