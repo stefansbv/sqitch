@@ -236,7 +236,7 @@ sub search_events {
         SELECT e.event
              , e.project
              , e.change_id
-             , e.change
+             , e."change"
              , e.note
              , e.requires
              , e.conflicts
@@ -757,7 +757,7 @@ sub _cid_head {
         SELECT change_id
           FROM changes
          WHERE project = ?
-           AND changes.change  = ?
+           AND changes."change" = ?
          ORDER BY committed_at DESC
          LIMIT 1
     }, undef, $project, $change)->[0];
@@ -794,7 +794,7 @@ sub change_id_for {
                     ON changes.committed_at <= tags.committed_at
                    AND changes.project = tags.project
                  WHERE changes.project = ?
-                   AND changes.change  = ?
+                   AND changes."change" = ?
                    AND tags.tag        = ?
             }, undef, $project, $change, '@' . $tag)->[0];
         }
@@ -804,7 +804,7 @@ sub change_id_for {
             SELECT change_id
               FROM changes
              WHERE project = ?
-               AND changes.change  = ?
+               AND changes."change" = ?
         }, undef, $project, $change);
         return $ids->[0] if @{ $ids } < 2;
         hurl engine => __x(
