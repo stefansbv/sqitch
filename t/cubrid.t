@@ -272,8 +272,9 @@ END {
 
 my $user = $ENV{CUBUSER} || 'dba';
 my $pass = $ENV{CUBPASS} || '';
+my $db_name = 'sqitchtest';
 my $err = try {
-    my $dsn = 'dbi:cubrid:database=sqitchtest';
+    my $dsn = "dbi:cubrid:database=$db_name";
     $dbh = DBI->connect($dsn, $user, $pass, {
         PrintError => 0,
         RaiseError => 1,
@@ -284,8 +285,7 @@ my $err = try {
     eval { $_->message } || $_;
 };
 
-my $db_name = 'sqitchtest';
-my $alt_db  = 'sqitchtest2';
+my $alt_db  = 'sqitchmeta2';
 
 DBIEngineTest->run(
     class         => $CLASS,
@@ -295,7 +295,7 @@ DBIEngineTest->run(
         top_dir     => Path::Class::dir(qw(t engine)),
         plan_file   => Path::Class::file(qw(t engine sqitch.plan)),
     ],
-    engine_params     => [ password => $pass ],
+    engine_params     => [ password => $pass, db_name => $db_name ],
     alt_engine_params => [ password => $pass, db_name => $db_name, sqitch_db => $alt_db ],
     skip_unless       => sub {
         my $self = shift;
