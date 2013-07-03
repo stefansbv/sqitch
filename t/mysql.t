@@ -42,8 +42,9 @@ is $mysql->sqitch_db, 'sqitch', 'sqitch_db default should be "sqitch"';
 for my $attr (qw(username password db_name host port destination)) {
     is $mysql->$attr, undef, "$attr default should be undef";
 }
-is $mysql->meta_destination, 'sqitch',
-    'meta_destination shoul default to "sqitch"';
+
+is $mysql->meta_destination, $mysql->sqitch_db,
+    'meta_destination should be the same as sqitch_db';
 
 my @std_opts = (
     '--skip-pager',
@@ -54,7 +55,7 @@ my @std_opts = (
 is_deeply [$mysql->mysql], [$client, @std_opts],
     'mysql command should be std opts-only';
 
-isa_ok $mysql = $CLASS->new(sqitch => $sqitch), $CLASS;
+isa_ok $mysql = $CLASS->new(sqitch => $sqitch, db_name => 'foo'), $CLASS;
 ok $mysql->set_variables(foo => 'baz', whu => 'hi there', yo => 'stellar'),
     'Set some variables';
 is_deeply [$mysql->mysql], [
@@ -62,6 +63,7 @@ is_deeply [$mysql->mysql], [
     # '--foo' => 'baz',
     # '--whu' => 'hi there',
     # '--yo'  => 'stellar',
+    '--database' => 'foo',
     @std_opts,
 ], 'Variables should not be passed to mysql';
 

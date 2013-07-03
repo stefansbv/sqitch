@@ -11,7 +11,7 @@ use App::Sqitch::X qw(hurl);
 use Locale::TextDomain qw(App-Sqitch);
 use namespace::autoclean;
 
-our $VERSION = '0.973';
+our $VERSION = '0.980';
 
 requires 'dbh';
 requires 'sqitch';
@@ -572,7 +572,7 @@ sub log_new_tags {
             SELECT i.* FROM (
                          } . join(
                 "\n               UNION ALL ",
-                ("SELECT ? AS tid, ?, ?, ?, ?, ?, ?, ?, ?, ?, $ts$sf") x @tags
+                ("SELECT ? AS tid, ? AS tname, ? AS proj, ? AS cid, ? AS note, ? AS cuser, ? AS cemail, ? AS tts, ? AS puser, ? AS pemail, $ts$sf") x @tags
             ) . q{
             ) i
               LEFT JOIN tags ON i.tid = tags.tag_id

@@ -17,7 +17,7 @@ extends 'App::Sqitch::Engine';
 sub dbh; # required by DBIEngine;
 with 'App::Sqitch::Role::DBIEngine';
 
-our $VERSION = '0.973';
+our $VERSION = '0.980';
 
 has client => (
     is       => 'ro',
@@ -73,8 +73,7 @@ has sqitch_db => (
     lazy     => 1,
     required => 1,
     default  => sub {
-        shift->sqitch->config->get( key => 'core.mysql.sqitch_db' )
-            || 'sqitch';
+        shift->sqitch->config->get( key => 'core.mysql.sqitch_db' ) || 'sqitch';
     },
 );
 
@@ -113,7 +112,7 @@ has dbh => (
         };
 
         my $dsn = 'dbi:mysql:database=' . ($self->sqitch_db || hurl mysql => __(
-            'No Sqitch database specified; use --sqitch-db or set "core.mysql.sqitch_db" via sqitch config'
+            'No database specified; use --db-name or set "core.mysql.db_name" via sqitch config'
         ));
 
         my $dbh = DBI->connect($dsn, $self->username, $self->password, {
@@ -260,17 +259,27 @@ sub initialize {
     $self->sqitch->run( @cmd, '--execute', "source $file" );
 }
 
-# Override to lock the changes table. This ensures that only one instance of
+# Override to lock the Sqitch tables. This ensures that only one instance of
 # Sqitch runs at one time.
 sub begin_work {
     my $self = shift;
     my $dbh = $self->dbh;
 
     # Start transaction and lock all tables to disallow concurrent changes.
-    $dbh->begin_work;
     $dbh->do('LOCK TABLES ' . join ', ', map {
         "$_ WRITE"
     } qw(changes dependencies events projects tags));
+    $dbh->begin_work;
+    return $self;
+}
+
+# Override to unlock the tables, otherwise future transactions on this
+# connection can fail.
+sub finish_work {
+    my $self = shift;
+    my $dbh = $self->dbh;
+    $dbh->commit;
+    $dbh->do('UNLOCK TABLES');
     return $self;
 }
 
