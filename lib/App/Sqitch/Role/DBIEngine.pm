@@ -187,7 +187,7 @@ sub search_events {
     for my $spec (
         [ committer => 'e.committer_name' ],
         [ planner   => 'e.planner_name'   ],
-        [ change    => 'e.change'         ],
+        [ change    => 'e."change"'       ],
         [ project   => 'e.project'        ],
     ) {
         my $regex = delete $p{ $spec->[0] } // next;
