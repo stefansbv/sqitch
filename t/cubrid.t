@@ -27,22 +27,22 @@ is_deeply [$CLASS->config_vars], [
     client    => 'any',
     user      => 'any',
     password  => 'any',
-    sqitch_db => 'any',
     db_name   => 'any',
     host      => 'any',
     port      => 'int',
+    sqitch_db => 'any',
 ], 'config_vars should return 7 vars';
 
 my $sqitch = App::Sqitch->new;
-isa_ok my $cub = $CLASS->new(sqitch => $sqitch, db_name => 'foodb'), $CLASS;
+isa_ok my $cub = $CLASS->new(sqitch => $sqitch), $CLASS;
 
 my $client = 'csql' . ($^O eq 'MSWin32' ? '.exe' : '');
 is $cub->client, $client, 'client should default to csql';
-is $cub->db_name, 'foodb', 'db_name should be required';
-is $cub->destination, $cub->db_name,
-    'Destination should be same as db_name';
-is $cub->sqitch_db, 'sqitchmeta',
-    "sqitch_db should default to 'sqitchmeta'";
+is $cub->sqitch_db, 'sqitch', 'sqitch_db default should be "sqitch"';
+for my $attr (qw(user password db_name host port destination)) {
+    is $cub->$attr, undef, "$attr default should be undef";
+}
+
 is $cub->meta_destination, $cub->sqitch_db,
     'Meta destination should be same as sqitch_db';
 
@@ -50,83 +50,32 @@ my @std_opts = (
     '--CS-mode',
     '--single-line',
     '--no-pager',
-    'foodb',
 );
 is_deeply [$cub->csql], [$client, @std_opts],
     'csql command should be std opts-only';
 
-# Set up username, password, and db_name.
-isa_ok $cub = $CLASS->new(
-    sqitch => $sqitch,
-    user     => 'fred',
-    password => 'derf',
-    db_name  => 'blah',
-), $CLASS;
-
-# Add a host name.
-isa_ok $cub = $CLASS->new(
-    sqitch => $sqitch,
-    user     => 'fred',
-    password => 'derf',
-    db_name  => 'blah',
-    host     => 'there',
-), $CLASS;
-
-# Add a port and varibles.
-isa_ok $cub = $CLASS->new(
-    sqitch => $sqitch,
-    user     => 'fred',
-    password => 'derf "derf"',
-    db_name  => 'blah "blah"',
-    host     => 'there',
-    port     => 1345,
-), $CLASS;
-
-##############################################################################
-# Test other configs for the destination?
-# No default env vars other # than $ENV{CUBRID} (the cubrid home
-# installation dir).
-# ENV: {
-#     Make sure we override system-set vars.
-#     local $ENV{PGDATABASE};
-#     local $ENV{PGUSER};
-#     for my $env (qw(PGDATABASE PGUSER)) {
-#         my $cub = $CLASS->new(sqitch => $sqitch);
-#         local $ENV{$env} = "\$ENV=whatever";
-#         is $cub->destination, "\$ENV=whatever", "Destination should read \$$env";
-#         is $cub->meta_destination, $cub->destination,
-#             'Meta destination should be the same as destination';
-#     }
-
-#     my $mocker = Test::MockModule->new('App::Sqitch');
-#     $mocker->mock(sysuser => 'sysuser=whatever');
-#     my $cub = $CLASS->new(sqitch => $sqitch);
-#     is $cub->destination, 'sysuser=whatever',
-#         'Destination should fall back on sysuser';
-#     is $cub->meta_destination, $cub->destination,
-#         'Meta destination should be the same as destination';
-
-#     $cub = $CLASS->new(sqitch => $sqitch, username => 'hi');
-#     is $cub->destination, 'hi', 'Destination should read username';
-#     is $cub->meta_destination, $cub->destination,
-#         'Meta destination should be the same as destination';
-
-#     $ENV{PGDATABASE} = 'mydb';
-#     $cub = $CLASS->new(sqitch => $sqitch, username => 'hi');
-#     is $cub->destination, 'mydb', 'Destination should prefer $PGDATABASE to username';
-#     is $cub->meta_destination, $cub->destination,
-#         'Meta destination should be the same as destination';
-# }
+isa_ok $cub = $CLASS->new(sqitch => $sqitch, db_name => 'foo'), $CLASS;
+ok $cub->set_variables(foo => 'baz', whu => 'hi there', yo => 'stellar'),
+    'Set some variables';
+is_deeply [$cub->csql], [
+    $client,
+    # '--foo' => 'baz',
+    # '--whu' => 'hi there',
+    # '--yo'  => 'stellar',
+    @std_opts,
+    'foo',
+], 'Variables should not be passed to csql';
 
 ##############################################################################
 # Make sure config settings override defaults.
 my %config = (
-    'core.cubrid.client'        => '/path/to/csql',
-    'core.cubrid.user'          => 'freddy',
-    'core.cubrid.password'      => 's3cr3t',
-    'core.cubrid.db_name'       => 'widgets',
-    'core.cubrid.host'          => 'db.example.com',
-    'core.cubrid.port'          => 1234,
+    'core.cubrid.client'    => '/path/to/csql',
+    'core.cubrid.user'      => 'freddy',
+    'core.cubrid.password'  => 's3cr3t',
+    'core.cubrid.db_name'   => 'widgets',
+    'core.cubrid.host'      => 'db.example.com',
+    'core.cubrid.port'      => 1234,
+    'core.cubrid.sqitch_db' => 'meta',
 );
 my $mock_config = Test::MockModule->new('App::Sqitch::Config');
 $mock_config->mock(get => sub { $config{ $_[2] } });
@@ -137,9 +86,10 @@ is $cub->user, 'freddy', 'username should be as configured';
 is $cub->password, 's3cr3t', 'password should be as configured';
 is $cub->db_name, 'widgets', 'db_name should be as configured';
 is $cub->destination, 'widgets', 'destination should default to db_name';
-is $cub->meta_destination, 'sqitchmeta', 'meta_destination should default to sqitch_db';
+is $cub->meta_destination, 'meta', 'meta_destination should default to sqitch_db';
 is $cub->host, 'db.example.com', 'host should be as configured';
 is $cub->port, 1234, 'port should be as configured';
+is $cub->sqitch_db, 'meta', 'sqitch_db should still be as configured';
 is_deeply [$cub->csql], [qw(
     /path/to/csql
     --user freddy
@@ -160,16 +110,18 @@ $sqitch = App::Sqitch->new(
     db_port     => 98760,
 );
 
-ok $cub = $CLASS->new(sqitch => $sqitch), 'Create a cub with sqitch with options';
+ok $cub = $CLASS->new(sqitch => $sqitch),
+    'Create a cubrid with sqitch with options';
 
 is $cub->client, '/some/other/csql', 'client should be as optioned';
 is $cub->user, 'anna', 'username should be as optioned';
 is $cub->password, 's3cr3t', 'password should still be as configured';
 is $cub->db_name, 'widgets_dev', 'db_name should be as optioned';
 is $cub->destination, 'widgets_dev', 'destination should still default to db_name';
-is $cub->meta_destination, 'sqitchmeta', 'meta_destination should still default to sqitch_db';
+is $cub->meta_destination, 'meta', 'meta_destination should still default to sqitch_db';
 is $cub->host, 'foo.com', 'host should be as optioned';
 is $cub->port, 98760, 'port should be as optioned';
+is $cub->sqitch_db, 'meta', 'sqitch_db should still be as configured';
 is_deeply [$cub->csql], [qw(
     /some/other/csql
     --user     anna
@@ -261,21 +213,19 @@ END {
     $dbh->{RaiseError} = 0;
     $dbh->{PrintError} = 1;
     $dbh->do($_) for (
-        'DROP TABLE events',
-        'DROP TABLE dependencies',
-        'DROP TABLE tags',
-        'DROP TABLE changes',
-        'DROP TABLE projects',
-        'DROP TYPE  sqitch_array',
+        'DROP TABLE IF EXISTS events',
+        'DROP TABLE IF EXISTS dependencies',
+        'DROP TABLE IF EXISTS tags',
+        'DROP TABLE IF EXISTS changes',
+        'DROP TABLE IF EXISTS projects',
     );
 }
 
-my $user = $ENV{CUBUSER} || 'dba';
 my $pass = $ENV{CUBPASS} || '';
-my $db_name = 'sqitchtest';
+
 my $err = try {
-    my $dsn = "dbi:cubrid:database=$db_name";
-    $dbh = DBI->connect($dsn, $user, $pass, {
+    my $dsn = "dbi:cubrid:database=__sqitchtest__";
+    $dbh = DBI->connect($dsn, 'dba', $pass, {
         PrintError => 0,
         RaiseError => 1,
         AutoCommit => 1,
@@ -285,18 +235,16 @@ my $err = try {
     eval { $_->message } || $_;
 };
 
-my $alt_db  = 'sqitchmeta2';
-
 DBIEngineTest->run(
     class         => $CLASS,
     sqitch_params => [
-        db_username => $user,
-        db_name     => $db_name,
+        db_username => 'dba',
+        db_name     => '__sqitchtest__',
         top_dir     => Path::Class::dir(qw(t engine)),
         plan_file   => Path::Class::file(qw(t engine sqitch.plan)),
     ],
-    engine_params     => [ password => $pass, db_name => $db_name ],
-    alt_engine_params => [ password => $pass, db_name => $db_name, sqitch_db => $alt_db ],
+    engine_params     => [ password => $pass, sqitch_db => '__metasqitch' ],
+    alt_engine_params => [ password => $pass, sqitch_db => '__sqitchtest' ],
     skip_unless       => sub {
         my $self = shift;
         die $err if $err;
@@ -309,7 +257,7 @@ DBIEngineTest->run(
     engine_err_regex  => qr/ERROR:/,
     init_error        =>  __x(
         'Sqitch database {database} already initialized',
-        database => $alt_db,
+        database => '__sqitchtest',
     ),
 );
 
