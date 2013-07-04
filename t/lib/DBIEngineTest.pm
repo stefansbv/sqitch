@@ -86,12 +86,15 @@ sub run {
         is $@->message, $p{init_error},
             'And it should show the proper schema in the error message';
 
-        throws_ok { $engine->dbh->do('INSERT blah INTO __bar_____') } 'App::Sqitch::X',
-            'Database error should be converted to Sqitch exception';
-        is $@->ident, $DBI::state, 'Ident should be SQL error state';
-        like $@->message, $p{engine_err_regex}, 'The message should be from the engine';
-        like $@->previous_exception, qr/DBD::[^:]+::db do failed: /,
-            'The DBI error should be in preview_exception';
+      SKIP: {
+            skip "Until DBD::cubrid new version release (> 9.1.0.0001)", 4 if $class eq 'App::Sqitch::Engine::cubrid';
+            throws_ok { $engine->dbh->do('INSERT blah INTO __bar_____') } 'App::Sqitch::X',
+                'Database error should be converted to Sqitch exception';
+            is $@->ident, $DBI::state, 'Ident should be SQL error state';
+            like $@->message, $p{engine_err_regex}, 'The message should be from the engine';
+            like $@->previous_exception, qr/DBD::[^:]+::db do failed: /,
+                'The DBI error should be in preview_exception';
+        }
 
         is $engine->current_state, undef, 'Current state should be undef';
         is_deeply all( $engine->current_changes ), [], 'Should have no current changes';
@@ -253,7 +256,8 @@ sub run {
             $change->planner_name,
             $change->planner_email
         ]);
-
+use Data::Printer; p @event_data;
+        p all_events($engine);
         is_deeply all_events($engine), \@event_data,
             'A record should have been inserted into the events table';
 
@@ -1588,7 +1592,7 @@ sub dt_for_event {
 
 sub all_changes {
     shift->dbh->selectall_arrayref(q{
-        SELECT change_id, c.change, project, note, committer_name, committer_email,
+        SELECT change_id, c."change", project, note, committer_name, committer_email,
                planner_name, planner_email
           FROM changes c
          ORDER BY committed_at
@@ -1606,7 +1610,7 @@ sub all_tags {
 
 sub all_events {
     shift->dbh->selectall_arrayref(q{
-        SELECT event, change_id, e.change, project, note, requires, conflicts, tags,
+        SELECT event, change_id, e."change", project, note, requires, conflicts, tags,
                committer_name, committer_email, planner_name, planner_email
           FROM events e
          ORDER BY committed_at
