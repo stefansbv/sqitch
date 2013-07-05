@@ -224,6 +224,11 @@ sub _ts2char_format {
 
 sub _ts_default { 'CURRENT_TIMESTAMP' }
 
+sub _quote_idents {
+    shift;
+    map { $_ eq 'change' ? '"change"' : $_ } @_;
+}
+
 sub initialized {
     my $self = shift;
 
@@ -330,18 +335,15 @@ sub _cid {
 }
 
 sub _log_tags_param {
-    my $str = join ',' => map { q{'} . $_->format_name . q{'} } $_[1]->tags;
-    return "{$str}";
+    [ map { $_->format_name } $_[1]->tags ];
 }
 
 sub _log_requires_param {
-    my $str = join ',' => map { q{'} . $_->as_string . q{'} } $_[1]->requires;
-    return "{$str}";
+    [ map { $_->as_string } $_[1]->requires ];
 }
 
 sub _log_conflicts_param {
-    my $str = join ',' => map { q{'} . $_->as_string . q{'} } $_[1]->conflicts;
-    return "{$str}";
+    [ map { $_->as_string } $_[1]->conflicts ];
 }
 
 sub is_deployed_change {
@@ -360,6 +362,21 @@ sub is_deployed_tag {
     )->[0];
 }
 
+sub _log_tags_param_insert {
+    my $str = join ',' => map { q{'} . $_->format_name . q{'} } $_[1]->tags;
+    return "{$str}";
+}
+
+sub _log_requires_param_insert {
+    my $str = join ',' => map { q{'} . $_->as_string . q{'} } $_[1]->requires;
+    return "{$str}";
+}
+
+sub _log_conflicts_param_insert {
+    my $str = join ',' => map { q{'} . $_->as_string . q{'} } $_[1]->conflicts;
+    return "{$str}";
+}
+
 sub _log_event {
     my ( $self, $event, $change, $tags, $requires, $conflicts) = @_;
 
@@ -367,9 +384,10 @@ sub _log_event {
     # http://www.cubrid.org/home_page/677557
     # CUBRID DBMS Error : (-494) Semantic: Cannot coerce host var to type
     # sequence.  at ... line ...
-    my $tg = $tags      || $self->_log_tags_param($change);
-    my $rq = $requires  || $self->_log_requires_param($change);
-    my $cf = $conflicts || $self->_log_conflicts_param($change);
+
+    my $tg = $tags      || $self->_log_tags_param_insert($change);
+    my $rq = $requires  || $self->_log_requires_param_insert($change);
+    my $cf = $conflicts || $self->_log_conflicts_param_insert($change);
     my $dbh    = $self->dbh;
     my $sqitch = $self->sqitch;
 
