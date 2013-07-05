@@ -442,7 +442,7 @@ bundle.from=gamma
 bundle.tags_only=true
 core.cubrid.client=/home/stefan/bin/CUBRID/bin/csql
 core.cubrid.host=localhost
-core.cubrid.sqitch_db=sqitchmeta
+core.cubrid.sqitch_db=sqitch
 core.cubrid.user=dba
 core.engine=pg
 core.extension=ddl
@@ -506,7 +506,7 @@ revert.to=gamma
     is_deeply \@emit, [[
         "core.cubrid.client=$ENV{CUBRID}/bin/csql
 core.cubrid.host=localhost
-core.cubrid.sqitch_db=sqitchmeta
+core.cubrid.sqitch_db=sqitch
 core.cubrid.user=dba
 core.mysql.client=/opt/local/mysql/bin/mysql
 core.mysql.sqitch_prefix=meta

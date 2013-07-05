@@ -256,8 +256,8 @@ sub run {
             $change->planner_name,
             $change->planner_email
         ]);
-use Data::Printer; p @event_data;
-        p all_events($engine);
+ use Data::Printer; p @event_data;
+ p all_events($engine);
         is_deeply all_events($engine), \@event_data,
             'A record should have been inserted into the events table';
 
@@ -408,6 +408,9 @@ use Data::Printer; p @event_data;
         is_deeply all( $engine->current_changes ), [],
             'Should again have no current changes';
         is_deeply all( $engine->current_tags ), [], 'Should again have no current tags';
+
+        # use Data::Printer;
+        # p dt_for_event($engine, 1);
 
         unshift @events => {
             event           => 'revert',
@@ -1576,6 +1579,7 @@ sub dt_for_event {
     my $col = sprintf $engine->_ts2char_format, 'committed_at';
     my $dtfunc = $engine->can('_dt');
     my $dbh = $engine->dbh;
+    local $dbh->{TraceLevel} = "1";
     return $dtfunc->($engine->dbh->selectcol_arrayref(qq{
         SELECT ts FROM (
             SELECT ts, rownum AS rnum FROM (
@@ -1585,9 +1589,15 @@ sub dt_for_event {
             )
         ) WHERE rnum = ?
     }, undef, $offset + 1)->[0]) if $dbh->{Driver}->{Name} eq 'Oracle';
-    return $dtfunc->($engine->dbh->selectcol_arrayref(
+    # return $dtfunc->($engine->dbh->selectcol_arrayref(
+    #     "SELECT $col FROM events ORDER BY committed_at ASC LIMIT 1 OFFSET $offset",
+    # )->[0]);
+    my $ref = $engine->dbh->selectcol_arrayref(
         "SELECT $col FROM events ORDER BY committed_at ASC LIMIT 1 OFFSET $offset",
-    )->[0]);
+    )->[0];
+    print "--- dt_for_event:\n";
+    p $ref;
+    return $dtfunc->($ref);
 }
 
 sub all_changes {
