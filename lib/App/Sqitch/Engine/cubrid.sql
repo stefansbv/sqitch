@@ -7,12 +7,15 @@
  *  - Array -> LIST ( = SEQUENCE )
  *    http://www.cubrid.org/manual/90/en/LIST|SEQUENCE
  *  - CHANGE is a reserved word!
+ *  - Comments for tables are kept in the "_cub_schema_comments"
+       ?system? table, not created by default... not to much info on
+       the subject in English.
 */
 
 CREATE TABLE projects (
     project         STRING     PRIMARY KEY,
     uri             STRING     NULL UNIQUE,
-    created_at      TIMESTAMP  DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at      DATETIME   DEFAULT CURRENT_TIMESTAMP NOT NULL,
     creator_name    STRING     NOT NULL,
     creator_email   STRING     NOT NULL
 );
@@ -31,10 +34,10 @@ CREATE TABLE changes (
     "change"        STRING     NOT NULL,
     project         STRING     NOT NULL REFERENCES projects(project),
     note            STRING     DEFAULT '',
-    committed_at    TIMESTAMP  DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    committed_at    DATETIME   DEFAULT CURRENT_TIMESTAMP NOT NULL,
     committer_name  STRING     NOT NULL,
     committer_email STRING     NOT NULL,
-    planned_at      TIMESTAMP  NOT NULL,
+    planned_at      DATETIME   NOT NULL,
     planner_name    STRING     NOT NULL,
     planner_email   STRING     NOT NULL
 );
@@ -59,10 +62,10 @@ CREATE TABLE tags (
     project         STRING     NOT NULL REFERENCES projects(project),
     change_id       CHAR(40)   NOT NULL REFERENCES changes(change_id),
     note            STRING     DEFAULT '',
-    committed_at    TIMESTAMP  DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    committed_at    DATETIME   DEFAULT CURRENT_TIMESTAMP NOT NULL,
     committer_name  STRING     NOT NULL,
     committer_email STRING     NOT NULL,
-    planned_at      TIMESTAMP  NOT NULL,
+    planned_at      DATETIME   NOT NULL,
     planner_name    STRING     NOT NULL,
     planner_email   STRING     NOT NULL,
     UNIQUE(project, tag)
@@ -111,13 +114,13 @@ CREATE TABLE events (
     "change"        STRING      NOT NULL,
     project         STRING      NOT NULL REFERENCES projects(project),
     note            STRING      DEFAULT '',
-    requires        SEQUENCE (VARCHAR(512)),
-    conflicts       SEQUENCE (VARCHAR(512)),
-    tags            SEQUENCE (VARCHAR(512)),
-    committed_at    TIMESTAMP   DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    requires        STRING      NOT NULL DEFAULT '',
+    conflicts       STRING      NOT NULL DEFAULT '',
+    tags            STRING      NOT NULL DEFAULT '',
+    committed_at    DATETIME    DEFAULT CURRENT_TIMESTAMP NOT NULL,
     committer_name  STRING      NOT NULL,
     committer_email STRING      NOT NULL,
-    planned_at      TIMESTAMP   NOT NULL,
+    planned_at      DATETIME    NOT NULL,
     planner_name    STRING      NOT NULL,
     planner_email   STRING      NOT NULL
 );

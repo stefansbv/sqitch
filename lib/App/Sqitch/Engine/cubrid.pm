@@ -22,15 +22,15 @@
 package App::Sqitch::Engine::cubrid;
 
 use 5.010;
-use Mouse;
+use strict;
+use warnings;
 use utf8;
-use Path::Class;
-use DBI;
 use Try::Tiny;
 use App::Sqitch::X qw(hurl);
 use Locale::TextDomain qw(App-Sqitch);
 use App::Sqitch::Plan::Change;
-use List::Util qw(first);
+use Path::Class;
+use Mouse;
 use namespace::autoclean;
 use Sort::Versions;
 
@@ -147,6 +147,23 @@ has dbh => (
                 @_ = ($dbh->state || 'DEV' => $dbh->errstr);
                 goto &hurl;
             },
+            Callbacks             => {
+                connected => sub {
+                    my $dbh = shift;
+                    # http://www.cubrid.org/manual/91/en/admin/config.html#cubrid-conf-default-parameters
+                    # TODO: Understand this parameters:
+                    # unicode_input_normalization  no
+                    # unicode_output_normalization no
+                    #
+                    # DATE | DATETIME | TIMESTAMP allows 0000-00-00
+                    # no_zero_date ?
+                    # no_zero_in_date ?
+                    $dbh->do("SET SYSTEM PARAMETERS $_") for (
+                        q{group_concat_max_len = 32768},
+                    );
+                    return;
+                },
+            },
         });
         # Make sure we support this version.
         my $want_version = '9.1.0';
@@ -222,7 +239,7 @@ sub _ts2char_format {
     q{to_char(%1$s, '"year":YYYY:"month":MM:"day":DD') || to_char(%1$s, ':"hour":HH24:"minute":MI:"second":SS:"time_zone":"UTC"')}
 }
 
-sub _ts_default { 'CURRENT_TIMESTAMP' }
+sub _ts_default { 'CURRENT_DATETIME' }
 
 sub _quote_idents {
     shift;
@@ -272,15 +289,15 @@ sub begin_work {
 }
 
 sub _no_table_error  {
-    return defined $DBI::err && $DBI::err == -20001; # a generic error?
+    return $DBI::errstr =~ /Unknown class/;
 }
 
 sub _regex_op { 'REGEXP(%s, ?)' }
 
-# sub _limit_default { '18446744073709551615' } ???
+sub _limit_default { '33554432' } # MySQL: '18446744073709551615'
 
 sub _listagg_format {
-    q{CONCAT_WS(' ', %s)};
+    return q{group_concat(%s SEPARATOR ' ')};
 }
 
 sub _run {
@@ -334,17 +351,17 @@ sub _cid {
     };
 }
 
-sub _log_tags_param {
-    [ map { $_->format_name } $_[1]->tags ];
-}
+# sub _log_tags_param {
+#     [ map { $_->format_name } $_[1]->tags ];
+# }
 
-sub _log_requires_param {
-    [ map { $_->as_string } $_[1]->requires ];
-}
+# sub _log_requires_param {
+#     [ map { $_->as_string } $_[1]->requires ];
+# }
 
-sub _log_conflicts_param {
-    [ map { $_->as_string } $_[1]->conflicts ];
-}
+# sub _log_conflicts_param {
+#     [ map { $_->as_string } $_[1]->conflicts ];
+# }
 
 sub is_deployed_change {
     my ( $self, $change ) = @_;
@@ -362,70 +379,55 @@ sub is_deployed_tag {
     )->[0];
 }
 
-sub _log_tags_param_insert {
-    my $str = join ',' => map { q{'} . $_->format_name . q{'} } $_[1]->tags;
-    return "{$str}";
-}
+# sub _log_event {
+#     my ( $self, $event, $change, $tags, $requires, $conflicts) = @_;
 
-sub _log_requires_param_insert {
-    my $str = join ',' => map { q{'} . $_->as_string . q{'} } $_[1]->requires;
-    return "{$str}";
-}
+#     # Can insert SEQUENCE with parameters? Not yet ;)
+#     # http://www.cubrid.org/home_page/677557
+#     # CUBRID DBMS Error : (-494) Semantic: Cannot coerce host var to type
+#     # sequence.  at ... line ...
 
-sub _log_conflicts_param_insert {
-    my $str = join ',' => map { q{'} . $_->as_string . q{'} } $_[1]->conflicts;
-    return "{$str}";
-}
+#     my $tg = $tags      || $self->_log_tags_param($change);
+#     my $rq = $requires  || $self->_log_requires_param($change);
+#     my $cf = $conflicts || $self->_log_conflicts_param($change);
+#     my $dbh    = $self->dbh;
+#     my $sqitch = $self->sqitch;
 
-sub _log_event {
-    my ( $self, $event, $change, $tags, $requires, $conflicts) = @_;
+#     my $ts = $self->_ts_default;
 
-    # Can insert SEQUENCE with parameters? Not yet ;)
-    # http://www.cubrid.org/home_page/677557
-    # CUBRID DBMS Error : (-494) Semantic: Cannot coerce host var to type
-    # sequence.  at ... line ...
+#     $dbh->do(qq{
+#         INSERT INTO events (
+#               event
+#             , change_id
+#             , "change"
+#             , project
+#             , note
+#             , tags
+#             , requires
+#             , conflicts
+#             , committer_name
+#             , committer_email
+#             , planned_at
+#             , planner_name
+#             , planner_email
+#             , committed_at
+#         )
+#         VALUES (?, ?, ?, ?, ?, $tg, $rq, $cf, ?, ?, ?, ?, ?, $ts)
+#     }, undef,
+#         $event,
+#         $change->id,
+#         $change->name,
+#         $change->project,
+#         $change->note,
+#         $sqitch->user_name,
+#         $sqitch->user_email,
+#         $self->_char2ts( $change->timestamp ),
+#         $change->planner_name,
+#         $change->planner_email,
+#     );
 
-    my $tg = $tags      || $self->_log_tags_param_insert($change);
-    my $rq = $requires  || $self->_log_requires_param_insert($change);
-    my $cf = $conflicts || $self->_log_conflicts_param_insert($change);
-    my $dbh    = $self->dbh;
-    my $sqitch = $self->sqitch;
-
-    my $ts = $self->_ts_default;
-
-    $dbh->do(qq{
-        INSERT INTO events (
-              event
-            , change_id
-            , "change"
-            , project
-            , note
-            , tags
-            , requires
-            , conflicts
-            , committer_name
-            , committer_email
-            , planned_at
-            , planner_name
-            , planner_email
-            , committed_at
-        )
-        VALUES (?, ?, ?, ?, ?, $tg, $rq, $cf, ?, ?, ?, ?, ?, $ts)
-    }, undef,
-        $event,
-        $change->id,
-        $change->name,
-        $change->project,
-        $change->note,
-        $sqitch->user_name,
-        $sqitch->user_email,
-        $self->_char2ts( $change->timestamp ),
-        $change->planner_name,
-        $change->planner_email,
-    );
-
-    return $self;
-}
+#     return $self;
+# }
 
 sub _ts2char($) {
     my $col = shift;
