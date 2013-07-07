@@ -114,7 +114,6 @@ sub run {
 
         is_deeply [ $engine->registered_projects ], [],
             'Should have no registered projects';
-
         ok $engine->register_project, 'Register the project';
         is_deeply [ $engine->registered_projects ], ['engine'],
             'Should have one registered project, "engine"';
@@ -224,6 +223,7 @@ sub run {
             'The change should not be deployed';
 
         ok $engine->log_deploy_change($change), 'Deploy "users" change';
+
         ok $engine->is_deployed_change($change), 'The change should now be deployed';
         is_deeply [$engine->are_deployed_changes($change)], [$change->id],
             'The change should now be deployed';
@@ -241,7 +241,6 @@ sub run {
         is_deeply [ $engine->changes_requiring_change($change) ], [],
             'Change should not be required';
 
-
         my @event_data = ([
             'deploy',
             $change->id,
@@ -256,8 +255,7 @@ sub run {
             $change->planner_name,
             $change->planner_email
         ]);
- use Data::Printer; p @event_data;
- p all_events($engine);
+
         is_deeply all_events($engine), \@event_data,
             'A record should have been inserted into the events table';
 
@@ -401,16 +399,12 @@ sub run {
 
         is_deeply all_events($engine), \@event_data,
             'The revert event should have been logged';
-
         is $engine->name_for_change_id($change->id), undef,
             'name_for_change_id() should no longer return the change name';
         is $engine->current_state, undef, 'Current state should be undef again';
         is_deeply all( $engine->current_changes ), [],
             'Should again have no current changes';
         is_deeply all( $engine->current_tags ), [], 'Should again have no current tags';
-
-        # use Data::Printer;
-        # p dt_for_event($engine, 1);
 
         unshift @events => {
             event           => 'revert',
@@ -849,9 +843,11 @@ sub run {
         is $engine->latest_change_id(3), $change->id,  'Should get "users" offset 3 from latest';
 
         $state = $engine->current_state;
-        # MySQL's group_concat() does not by default sort by row order, alas.
+        # ?CUBRID? amd MySQL's group_concat() does not by default sort
+        # by row order, alas.
         $state->{tags} = [ sort @{ $state->{tags} } ]
-            if $class eq 'App::Sqitch::Engine::mysql';
+            if $class eq 'App::Sqitch::Engine::mysql'
+            or $class eq 'App::Sqitch::Engine::cubrid'; # ???
         is_deeply $state, {
             project         => 'engine',
             change_id       => $barney->id,
@@ -1589,15 +1585,9 @@ sub dt_for_event {
             )
         ) WHERE rnum = ?
     }, undef, $offset + 1)->[0]) if $dbh->{Driver}->{Name} eq 'Oracle';
-    # return $dtfunc->($engine->dbh->selectcol_arrayref(
-    #     "SELECT $col FROM events ORDER BY committed_at ASC LIMIT 1 OFFSET $offset",
-    # )->[0]);
-    my $ref = $engine->dbh->selectcol_arrayref(
+    return $dtfunc->($engine->dbh->selectcol_arrayref(
         "SELECT $col FROM events ORDER BY committed_at ASC LIMIT 1 OFFSET $offset",
-    )->[0];
-    print "--- dt_for_event:\n";
-    p $ref;
-    return $dtfunc->($ref);
+    )->[0]);
 }
 
 sub all_changes {
