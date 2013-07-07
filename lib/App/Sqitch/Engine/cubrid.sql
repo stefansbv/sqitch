@@ -15,7 +15,7 @@
 CREATE TABLE projects (
     project         STRING     PRIMARY KEY,
     uri             STRING     NULL UNIQUE,
-    created_at      DATETIME   DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at      DATETIME   DEFAULT CURRENT_DATETIME NOT NULL,
     creator_name    STRING     NOT NULL,
     creator_email   STRING     NOT NULL
 );
@@ -34,7 +34,7 @@ CREATE TABLE changes (
     "change"        STRING     NOT NULL,
     project         STRING     NOT NULL REFERENCES projects(project),
     note            STRING     DEFAULT '',
-    committed_at    DATETIME   DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    committed_at    DATETIME   DEFAULT CURRENT_DATETIME NOT NULL,
     committer_name  STRING     NOT NULL,
     committer_email STRING     NOT NULL,
     planned_at      DATETIME   NOT NULL,
@@ -62,7 +62,7 @@ CREATE TABLE tags (
     project         STRING     NOT NULL REFERENCES projects(project),
     change_id       CHAR(40)   NOT NULL REFERENCES changes(change_id),
     note            STRING     DEFAULT '',
-    committed_at    DATETIME   DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    committed_at    DATETIME   DEFAULT CURRENT_DATETIME NOT NULL,
     committer_name  STRING     NOT NULL,
     committer_email STRING     NOT NULL,
     planned_at      DATETIME   NOT NULL,
@@ -117,7 +117,7 @@ CREATE TABLE events (
     requires        STRING      NOT NULL DEFAULT '',
     conflicts       STRING      NOT NULL DEFAULT '',
     tags            STRING      NOT NULL DEFAULT '',
-    committed_at    DATETIME    DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    committed_at    DATETIME    DEFAULT CURRENT_DATETIME NOT NULL,
     committer_name  STRING      NOT NULL,
     committer_email STRING      NOT NULL,
     planned_at      DATETIME    NOT NULL,
