@@ -292,7 +292,7 @@ sub _no_table_error  {
     return $DBI::errstr =~ /Unknown class/;
 }
 
-sub _regex_op { 'REGEXP(%s, ?)' }
+sub _regex_op { 'REGEXP' }
 
 sub _limit_default { '33554432' } # MySQL: '18446744073709551615'
 
