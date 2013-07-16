@@ -150,16 +150,18 @@ has dbh => (
             Callbacks             => {
                 connected => sub {
                     my $dbh = shift;
+                    # This currently doesn't work:
+                    # http://www.cubrid.org/forum/694738
+                    #
                     # http://www.cubrid.org/manual/91/en/admin/config.html#cubrid-conf-default-parameters
                     # TODO: Understand this parameters:
                     # unicode_input_normalization  no
                     # unicode_output_normalization no
                     #
                     # DATE | DATETIME | TIMESTAMP allows 0000-00-00
-                    # no_zero_date ?
-                    # no_zero_in_date ?
+                    # No setting to change this :(
                     $dbh->do("SET SYSTEM PARAMETERS $_") for (
-                        q{group_concat_max_len = 32768},
+                        q{group_concat_max_len=32768},
                     );
                     return;
                 },

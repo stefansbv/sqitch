@@ -254,11 +254,24 @@ DBIEngineTest->run(
         # $self->_capture('--version'); # capture doesn't work
         $self->_capture('--command' => 'SELECT version()');
     },
-    engine_err_regex  => qr/ERROR:/,
+    engine_err_regex  => qr/^ERROR:/,
     init_error        =>  __x(
         'Sqitch database {database} already initialized',
         database => '__sqitchtest',
     ),
+    add_second_format => q{date_add(%s, interval 1 second)},
+    # test_dbh => sub {
+    #     my $dbh = shift;
+    #     # Check the session configuration.
+    #     for my $spec (
+    #         [group_concat_max_len => 32768],
+    #     ) {
+    #         # How can you get CUBRID system parameters using SQL ? Not yet :(
+    #         # http://www.cubrid.org/questions/432659
+    #         # is $dbh->selectcol_arrayref('SELECT @SESSION.' . $spec->[0])->[0],
+    #         #     $spec->[1], "Setting $spec->[0] should be set to $spec->[1]";
+    #     }
+    # },
 );
 
 done_testing;

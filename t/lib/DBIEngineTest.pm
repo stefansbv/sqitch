@@ -843,11 +843,10 @@ sub run {
         is $engine->latest_change_id(3), $change->id,  'Should get "users" offset 3 from latest';
 
         $state = $engine->current_state;
-        # ?CUBRID? amd MySQL's group_concat() does not by default sort
-        # by row order, alas.
+        # MySQL's group_concat() does not by default sort by row
+        # order, alas. +1 for CUBRID ;)
         $state->{tags} = [ sort @{ $state->{tags} } ]
-            if $class eq 'App::Sqitch::Engine::mysql'
-            or $class eq 'App::Sqitch::Engine::cubrid'; # ???
+            if $class eq 'App::Sqitch::Engine::mysql';
         is_deeply $state, {
             project         => 'engine',
             change_id       => $barney->id,
@@ -955,6 +954,12 @@ sub run {
 
         is_deeply all( $engine->search_events(offset => 4) ), [ @events[4..$#events] ],
             'The offset param to search_events should work';
+
+        # use Data::Printer {
+        #     output => 'error.pl',
+        # };
+        # p all( $engine->search_events(limit => 3, offset => 4)  )  ;
+        # p @events;
 
         is_deeply all( $engine->search_events(limit => 3, offset => 4) ), [ @events[4..6] ],
             'The limit and offset params to search_events should work together';
@@ -1575,7 +1580,6 @@ sub dt_for_event {
     my $col = sprintf $engine->_ts2char_format, 'committed_at';
     my $dtfunc = $engine->can('_dt');
     my $dbh = $engine->dbh;
-    local $dbh->{TraceLevel} = "1";
     return $dtfunc->($engine->dbh->selectcol_arrayref(qq{
         SELECT ts FROM (
             SELECT ts, rownum AS rnum FROM (
