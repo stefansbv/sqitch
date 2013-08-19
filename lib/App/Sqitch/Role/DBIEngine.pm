@@ -46,7 +46,7 @@ sub _limit_default { undef }
 
 sub _simple_from { '' }
 
-sub _quote_idents { shift; @_ }
+# sub _quote_idents { shift; wantarray ? @_ : $_[0] } # not used
 
 sub _in_expr {
     my ($self, $vals) = @_;
@@ -84,32 +84,40 @@ sub current_state {
     my $cdtcol = sprintf $self->_ts2char_format, 'c.committed_at';
     my $pdtcol = sprintf $self->_ts2char_format, 'c.planned_at';
     my $tagcol = sprintf $self->_listagg_format, 't.tag';
-    my $dbh    = $self->dbh;
+    my $dbh  = $self->dbh;
+    my $cols = q{c.change_id};
+    $cols .=  qq{\n             , c."$_"} foreach (qw(
+        change
+        project
+        note
+        committer_name
+        committer_email
+        planner_name
+        planner_email
+      ));
+    my $group = q{c.change_id};
+    $cols .=  qq{\n             , c."$_"} foreach (qw(
+        change
+        project
+        note
+        committer_name
+        committer_email
+        committed_at
+        planner_name
+        planner_email
+        planned_at
+    ));
     my $state  = $dbh->selectrow_hashref(qq{
-        SELECT c.change_id
-             , c."change"
-             , c.project
-             , c.note
-             , c.committer_name
-             , c.committer_email
-             , $cdtcol AS committed_at
-             , c.planner_name
-             , c.planner_email
-             , $pdtcol AS planned_at
-             , $tagcol AS tags
+         SELECT $cols
+              , $cdtcol AS committed_at
+              , $pdtcol AS planned_at
+              , $tagcol AS tags
+              , $pdtcol AS planned_at
+              , $tagcol AS tags
           FROM changes   c
           LEFT JOIN tags t ON c.change_id = t.change_id
          WHERE c.project = ?
-         GROUP BY c.change_id
-             , c."change"
-             , c.project
-             , c.note
-             , c.committer_name
-             , c.committer_email
-             , c.committed_at
-             , c.planner_name
-             , c.planner_email
-             , c.planned_at
+         GROUP BY $group
          ORDER BY c.committed_at DESC
          LIMIT 1
     }, undef, $project // $self->plan->project ) or return undef;
@@ -125,14 +133,17 @@ sub current_changes {
     my ( $self, $project ) = @_;
     my $cdtcol = sprintf $self->_ts2char_format, 'c.committed_at';
     my $pdtcol = sprintf $self->_ts2char_format, 'c.planned_at';
+    my $cols   = q{c.change_id};
+        $cols .=  qq{\n             , c."$_"} foreach (qw(
+        change
+        committer_name
+        committer_email
+        planner_name
+        planner_email
+      ));
     my $sth    = $self->dbh->prepare(qq{
-        SELECT c.change_id
-             , c."change"
-             , c.committer_name
-             , c.committer_email
+        SELECT $cols
              , $cdtcol AS committed_at
-             , c.planner_name
-             , c.planner_email
              , $pdtcol AS planned_at
           FROM changes c
          WHERE project = ?
@@ -235,20 +246,23 @@ sub search_events {
     # Prepare, execute, and return.
     my $cdtcol = sprintf $self->_ts2char_format, 'e.committed_at';
     my $pdtcol = sprintf $self->_ts2char_format, 'e.planned_at';
+    my $cols   = q{e.event};
+        $cols .=  qq{\n             , e."$_"} foreach (qw(
+             project
+             change_id
+             change
+             note
+             requires
+             conflicts
+             tags
+             committer_name
+             committer_email
+             planner_name
+             planner_email
+      ));
     my $sth = $self->dbh->prepare(qq{
-        SELECT e.event
-             , e.project
-             , e.change_id
-             , e."change"
-             , e.note
-             , e.requires
-             , e.conflicts
-             , e.tags
-             , e.committer_name
-             , e.committer_email
+        SELECT $cols
              , $cdtcol AS committed_at
-             , e.planner_name
-             , e.planner_email
              , $pdtcol AS planned_at
           FROM events e$where
          ORDER BY e.committed_at $dir$limits
@@ -382,9 +396,9 @@ sub log_deploy_change {
     );
 
     my $ts = $self->_ts_default;
-    my $cols = join "\n            , ", $self->_quote_idents(qw(
-        change_id
-        "change"
+    my $cols   = q{change_id};
+        $cols .=  qq{\n             , "$_"} foreach (qw(
+        change
         project
         note
         committer_name
@@ -473,10 +487,10 @@ sub _log_event {
     my $sqitch = $self->sqitch;
 
     my $ts   = $self->_ts_default;
-    my $cols = join "\n            , ", $self->_quote_idents(qw(
-        event
+    my $cols  = q{event};
+       $cols .=  qq{\n             , "$_"} foreach (qw(
         change_id
-        "change"
+        change
         project
         note
         tags
@@ -516,8 +530,13 @@ sub _log_event {
 
 sub changes_requiring_change {
     my ( $self, $change ) = @_;
-    return @{ $self->dbh->selectall_arrayref(q{
-        SELECT c.change_id, c.project, c."change", (
+    my $cols = q{c.change_id};
+    $cols .=  qq{\n             , c."$_"} foreach (qw(
+        project
+        change
+      ));
+    return @{ $self->dbh->selectall_arrayref(qq{
+        SELECT $cols, (
             SELECT tag
               FROM changes c2
               JOIN tags ON c2.change_id = tags.change_id

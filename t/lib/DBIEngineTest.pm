@@ -86,9 +86,9 @@ sub run {
         is $@->message, $p{init_error},
             'And it should show the proper schema in the error message';
 
-        # Stil NOT solved in 9.2.0.0001 :(
+        # Stil NOT solved in 9.2.0.0001 or is it 9.1.0.0002? :(
       SKIP: {
-            skip "Until DBD::cubrid new version release (> 9.1.0.0001)", 4 if $class eq 'App::Sqitch::Engine::cubrid';
+            skip "Until DBD::cubrid new version release (> 9.1.0.0002)", 4 if $class eq 'App::Sqitch::Engine::cubrid';
             throws_ok { $engine->dbh->do('INSERT blah INTO __bar_____') } 'App::Sqitch::X',
                 'Database error should be converted to Sqitch exception';
             is $@->ident, $DBI::state, 'Ident should be SQL error state';
