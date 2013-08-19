@@ -384,7 +384,7 @@ sub log_deploy_change {
     my $ts = $self->_ts_default;
     my $cols = join "\n            , ", $self->_quote_idents(qw(
         change_id
-        change
+        "change"
         project
         note
         committer_name
@@ -476,7 +476,7 @@ sub _log_event {
     my $cols = join "\n            , ", $self->_quote_idents(qw(
         event
         change_id
-        change
+        "change"
         project
         note
         tags
@@ -814,7 +814,7 @@ sub change_id_for {
             SELECT change_id
               FROM changes
              WHERE project = ?
-               AND changes.change  = ?
+               AND changes."change" = ?
              ORDER BY changes.committed_at ASC$limit
         }, undef, $project, $change)->[0];
     }
