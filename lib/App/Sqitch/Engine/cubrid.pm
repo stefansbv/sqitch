@@ -33,6 +33,7 @@ use Path::Class;
 use Mouse;
 use namespace::autoclean;
 use Sort::Versions;
+use DBI;
 
 extends 'App::Sqitch::Engine';
 sub dbh; # required by DBIEngine;
@@ -143,6 +144,7 @@ has dbh => (
             FetchHashKeyName  => 'NAME_lc',
             HandleError       => sub {
                 my ($err, $dbh) = @_;
+                print "!!!!!!!!!!!!!!!!!!! HandleError !!!!!!!!!!!!!!!!!!!!\n";
                 $@ = $err;
                 @_ = ($dbh->state || 'DEV' => $dbh->errstr);
                 goto &hurl;
@@ -150,6 +152,7 @@ has dbh => (
             Callbacks             => {
                 connected => sub {
                     my $dbh = shift;
+                    print "!!!!!!!!!!! CONNECTED called !!!!!!!!!!!!\n";
                     # This currently doesn't work:
                     # http://www.cubrid.org/forum/694738
                     #
