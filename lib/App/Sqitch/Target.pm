@@ -154,44 +154,45 @@ has top_dir => (
     },
 );
 
-has deploy_dir => (
+has reworked_dir => (
     is      => 'ro',
     isa     => Dir,
     lazy    => 1,
     default => sub {
         my $self = shift;
-        if ( my $dir = $self->_fetch('deploy_dir') ) {
+        if ( my $dir = $self->_fetch('reworked_dir') ) {
             return dir $dir;
         }
-        $self->top_dir->subdir('deploy')->cleanup;
+        $self->top_dir;
     },
 );
 
-has revert_dir => (
-    is      => 'ro',
-    isa     => Dir,
-    lazy    => 1,
-    default => sub {
-        my $self = shift;
-        if ( my $dir = $self->_fetch('revert_dir') ) {
-            return dir $dir;
-        }
-        $self->top_dir->subdir('revert')->cleanup;
-    },
-);
-
-has verify_dir => (
-    is      => 'ro',
-    isa     => Dir,
-    lazy    => 1,
-    default => sub {
-        my $self = shift;
-        if ( my $dir = $self->_fetch('verify_dir') ) {
-            return dir $dir;
-        }
-        $self->top_dir->subdir('verify')->cleanup;
-    },
-);
+for my $script (qw(deploy revert verify)) {
+    has "$script\_dir" => (
+        is      => 'ro',
+        isa     => Dir,
+        lazy    => 1,
+        default => sub {
+            my $self = shift;
+            if ( my $dir = $self->_fetch("$script\_dir") ) {
+                return dir $dir;
+            }
+            $self->top_dir->subdir($script)->cleanup;
+        },
+    );
+    has "reworked_$script\_dir" => (
+        is      => 'ro',
+        isa     => Dir,
+        lazy    => 1,
+        default => sub {
+            my $self = shift;
+            if ( my $dir = $self->_fetch("reworked_$script\_dir") ) {
+                return dir $dir;
+            }
+            $self->reworked_dir->subdir($script)->cleanup;
+        },
+    );
+}
 
 has extension => (
     is      => 'ro',
@@ -209,15 +210,7 @@ sub BUILDARGS {
     # Fetch params. URI can come from passed name.
     my $sqitch = $p->{sqitch} or return $p;
     my $name   = $p->{name} || '';
-    my $uri    = $p->{uri} ||= do {
-        if ($name =~ /:/) {
-            my $u = URI::db->new($name);
-            if ($u && $u->canonical_engine) {
-                $name = '';
-                $u;
-            }
-        }
-    };
+    my $uri    = $p->{uri};
 
     # If we have a URI up-front, it's all good.
     if ($uri) {
@@ -246,7 +239,8 @@ sub BUILDARGS {
             unless ($ekey) {
                 # No --engine, look for core target.
                 if ( $uri = $config->get( key => 'core.target' ) ) {
-                    # We got core.target.
+                    # We got core.target. Merge all deprecated stuff.
+                    $merge = 2;
                     $p->{name} = $name = $uri;
                     last NAME;
                 }
@@ -261,16 +255,17 @@ sub BUILDARGS {
 
             # Find the name in the engine config, or fall back on a simple URI.
             $uri = $class->_engine_var($config, $ekey, 'target') || "db:$ekey:";
+            $merge = 2; # Merge all deprecated stuff.
             $p->{name} = $name = $uri;
         }
     }
 
     # Now we should have a name. What is it?
     if ($name =~ /:/) {
-        # The name is a URI from core.target or core.engine.target.
+        # The name is a URI.
         $uri = $name;
         $name  = $p->{name} = undef;
-        $merge = 2; # Merge all deprecated stuff.
+        $merge ||= 1; # At least merge options.
     } else {
         # Well then, there had better be a config with a URI.
         $uri = $config->get( key => "target.$name.uri" ) or do {
@@ -286,7 +281,7 @@ sub BUILDARGS {
                 target => $name,
             );
         };
-        $merge = 1; # Merge only options.
+        $merge ||= 1; # At least merge options.
     }
 
     # Instantiate the URI.
@@ -360,8 +355,9 @@ sub BUILDARGS {
 sub all_targets {
     my ($class, %p) = @_;
     my $sqitch = $p{sqitch} or hurl 'Missing required argument: sqitch';
+    my $config = $p{config} || $sqitch->config;
     my (@targets, %seen);
-    my %dump = $sqitch->config->dump;
+    my %dump = $config->dump;
 
     # First, load the default target.
     my $core = $dump{'core.target'} || do {
@@ -471,9 +467,9 @@ reasonable default from the command-line options or engine configuration.
 
 =head3 C<all_targets>
 
-Returns a list of all the targets defined by the Sqitch configuration files.
-Done by examining the configuration object to find all defined targets and
-engines, as well as the default "core" target. Duplicates are removed and
+Returns a list of all the targets defined by the local Sqitch configuration
+file. Done by examining the configuration object to find all defined targets
+and engines, as well as the default "core" target. Duplicates are removed and
 the list returned. This method takes two parameters:
 
 =over
@@ -628,7 +624,7 @@ comes from one of these options, searched in this order:
 
 =over
 
-=item * C<--deploy-dir>
+=item * C<--dir deploy_dir=$deploy_dir>
 
 =item * C<target.$name.deploy_dir>
 
@@ -650,7 +646,7 @@ from one of these options, searched in this order:
 
 =over
 
-=item * C<--revert-dir>
+=item * C<--dir revert_dir=$revert_dir>
 
 =item * C<target.$name.revert_dir>
 
@@ -672,7 +668,7 @@ comes from one of these options, searched in this order:
 
 =over
 
-=item * C<--verify-dir>
+=item * C<--dir verify_dir=$verify_dir>
 
 =item * C<target.$name.verify_dir>
 
@@ -681,6 +677,97 @@ comes from one of these options, searched in this order:
 =item * C<core.verify_dir>
 
 =item * F<C<$top_dir/verify>>
+
+=back
+
+=head3 C<reworked_dir>
+
+  my $reworked_dir = $target->reworked_dir;
+
+The path to the reworked directory of the project. This directory contains
+subdirectories for reworked deploy, revert, and verify scripts. The value
+comes from one of these options, searched in this order:
+
+=over
+
+=item * C<--dir reworked_dir=$reworked_dir>
+
+=item * C<target.$name.reworked_dir>
+
+=item * C<engine.$engine.reworked_dir>
+
+=item * C<core.reworked_dir>
+
+=item * C<$top_dir>
+
+=back
+
+=head3 C<reworked_deploy_dir>
+
+  my $reworked_deploy_dir = $target->reworked_deploy_dir;
+
+The path to the reworked deploy directory of the project. This directory
+contains all of the reworked deploy scripts referenced by changes in the
+C<plan_file>. The value comes from one of these options, searched in this
+order:
+
+=over
+
+=item * C<--dir reworked_deploy_dir=$reworked_deploy_dir>
+
+=item * C<target.$name.reworked_deploy_dir>
+
+=item * C<engine.$engine.reworked_deploy_dir>
+
+=item * C<core.reworked_deploy_dir>
+
+=item * F<C<$reworked_dir/reworked_deploy>>
+
+=back
+
+=head3 C<reworked_revert_dir>
+
+  my $reworked_revert_dir = $target->reworked_revert_dir;
+
+The path to the reworked revert directory of the project. This directory
+contains all of the reworked revert scripts referenced by changes the
+C<plan_file>. The value comes from one of these options, searched in this
+order:
+
+=over
+
+=item * C<--dir reworked_revert_dir=$reworked_revert_dir>
+
+=item * C<target.$name.reworked_revert_dir>
+
+=item * C<engine.$engine.reworked_revert_dir>
+
+=item * C<core.reworked_revert_dir>
+
+=item * F<C<$reworked_dir/reworked_revert>>
+
+=back
+
+=head3 C<reworked_verify_dir>
+
+  my $reworked_verify_dir = $target->reworked_verify_dir;
+
+The path to the reworked verify directory of the project. This directory
+contains all of the reworked verify scripts referenced by changes in the
+C<plan_file>. The value comes from one of these options, searched in this
+order:
+
+=over
+
+=item * C<--dir reworked_verify_dir=$reworked_verify_dir>
+
+=item * C<target.$name.reworked_verify_dir>
+
+=item * C<engine.$engine.reworked_verify_dir>
+
+=item * C<core.reworked_verify_dir>
+
+=item * F<C<$reworked_dir/reworked_verify>>
 
 =back
 

@@ -1,6 +1,6 @@
 Name:           sqitch
-Version:        0.9993
-Release:        1%{?dist}
+Version:        0.9996
+Release:        2%{?dist}
 Summary:        Sane database change management
 License:        MIT
 Group:          Development/Libraries
@@ -16,7 +16,7 @@ BuildRequires:  perl(Clone)
 BuildRequires:  perl(Config)
 BuildRequires:  perl(Config::GitLike) >= 1.11
 BuildRequires:  perl(constant)
-BuildRequires:  perl(DateTime)
+BuildRequires:  perl(DateTime) >= 1.04
 BuildRequires:  perl(DateTime::TimeZone)
 BuildRequires:  perl(DBI)
 BuildRequires:  perl(Devel::StackTrace) >= 1.30
@@ -25,6 +25,7 @@ BuildRequires:  perl(Encode)
 BuildRequires:  perl(Encode::Locale)
 BuildRequires:  perl(File::Basename)
 BuildRequires:  perl(File::Copy)
+BuildRequires:  perl(File::Find)
 BuildRequires:  perl(File::HomeDir)
 BuildRequires:  perl(File::Path)
 BuildRequires:  perl(File::Spec)
@@ -38,14 +39,15 @@ BuildRequires:  perl(List::Util)
 BuildRequires:  perl(List::MoreUtils)
 BuildRequires:  perl(Locale::TextDomain) >= 1.20
 BuildRequires:  perl(Module::Build) >= 0.35
+BuildRequires:  perl(Module::Runtime)
 BuildRequires:  perl(Moo) >= 1.002000
 BuildRequires:  perl(Moo::Role)
-BuildRequires:  perl(Moo::sification)
 BuildRequires:  perl(namespace::autoclean) >= 0.16
 BuildRequires:  perl(parent)
 BuildRequires:  perl(overload)
 BuildRequires:  perl(Path::Class) >= 0.33
 BuildRequires:  perl(PerlIO::utf8_strict)
+BuildRequires:  perl(Pod::Escapes)
 BuildRequires:  perl(Pod::Find)
 BuildRequires:  perl(Pod::Usage)
 BuildRequires:  perl(POSIX)
@@ -84,7 +86,7 @@ Requires:       perl(Clone)
 Requires:       perl(Config)
 Requires:       perl(Config::GitLike) >= 1.11
 Requires:       perl(constant)
-Requires:       perl(DateTime)
+Requires:       perl(DateTime) >= 1.04
 Requires:       perl(DateTime::TimeZone)
 Requires:       perl(Devel::StackTrace) >= 1.30
 Requires:       perl(Digest::SHA)
@@ -105,12 +107,12 @@ Requires:       perl(List::MoreUtils)
 Requires:       perl(Locale::TextDomain) >= 1.20
 Requires:       perl(Moo) => 1.002000
 Requires:       perl(Moo::Role)
-Requires:       perl(Moo::sification)
 Requires:       perl(namespace::autoclean) >= 0.16
 Requires:       perl(parent)
 Requires:       perl(overload)
 Requires:       perl(Path::Class)
 Requires:       perl(PerlIO::utf8_strict)
+Requires:       perl(Pod::Escapes)
 Requires:       perl(Pod::Find)
 Requires:       perl(Pod::Usage)
 Requires:       perl(POSIX)
@@ -229,7 +231,7 @@ package bundles the Sqitch Oracle support.
 Summary:        Sane database change management for MySQL
 Group:          Development/Libraries
 Requires:       sqitch >= %{version}
-Requires:       mysql >= 5.1.0
+Requires:       mysql >= 5.0.0
 Requires:       perl(DBI)
 Requires:       perl(DBD::mysql) >= 4.018
 Requires:       perl(MySQL::Config)
@@ -282,6 +284,28 @@ Sqitch Vertica support.
 # No additional files required.
 
 %changelog
+* Wed Jul 29 2017 David E. Wheeler <david.wheeler@iovation.com> 0.9996-2
+- Require File::Find and Module::Runtime at build time.
+- Remove Moo::sification.
+
+* Mon Jul 17 2017 David E. Wheeler <david.wheeler@iovation.com> 0.9996-1
+- Upgrade to v0.9996.
+
+* Wed Jul 27 2016 David E. Wheeler <david.wheeler@iovation.com> 0.9995-1
+- Require DateTime v1.04.
+- Upgrade to v0.9995.
+
+* Thu Feb 11 2016 David E. Wheeler <david.wheeler@iovation.com> 0.9994-2
+- Add perl(Pod::Escapes) to work around missing dependencies in Pod::Simple.
+  https://github.com/perl-pod/pod-simple/issues/84.
+
+* Fri Jan 8 2016 David E. Wheeler <david.wheeler@iovation.com> 0.9994-1
+- Reduced required MySQL version to 5.0.
+- Upgrade to v0.9994.
+
+* Mon Aug 17 2015 David E. Wheeler <david.wheeler@iovation.com> 0.9993-1
+- Upgrade to v0.9993.
+
 * Wed May 20 2015 David E. Wheeler <david.wheeler@iovation.com> 0.9992-1
 - Upgrade to v0.9992.
 - Add perl(DateTime::TimeZone).
@@ -331,7 +355,7 @@ Sqitch Vertica support.
 - Upgrade to v0.991.
 - Remove File::Which from sqitch-firebird.
 
-* Fri Jan 4 2014 David E. Wheeler <david.wheeler@iovation.com> 0.990-1
+* Fri Jan 3 2014 David E. Wheeler <david.wheeler@iovation.com> 0.990-1
 - Upgrade to v0.990.
 - Add sqitch-firebird.
 - Add target command and arguments.
@@ -354,7 +378,7 @@ Sqitch Vertica support.
 * Thu Sep 5 2013 David E. Wheeler <david.wheeler@iovation.com> 0.981-1
 - Upgrade to v0.981.
 
-* Tue Aug 28 2013 David E. Wheeler <david.wheeler@iovation.com> 0.980-1
+* Wed Aug 28 2013 David E. Wheeler <david.wheeler@iovation.com> 0.980-1
 - Upgrade to v0.980.
 - Require Encode::Locale.
 - Require DBD::SQLite 1.37.
@@ -381,12 +405,12 @@ Sqitch Vertica support.
 * Mon Apr 15 2013 David E. Wheeler <david.wheeler@iovation.com> 0.964-1
 - Upgrade to v0.964.
 
-* Thu Apr 12 2013 David E. Wheeler <david.wheeler@iovation.com> 0.963-1
+* Fri Apr 12 2013 David E. Wheeler <david.wheeler@iovation.com> 0.963-1
 - Upgrade to v0.963.
 - Add missing dependency on Devel::StackTrace 1.30.
 - Remove dependency on Git::Wrapper.
 
-* Tue Apr 10 2013 David E. Wheeler <david.wheeler@iovation.com> 0.962-1
+* Wed Apr 10 2013 David E. Wheeler <david.wheeler@iovation.com> 0.962-1
 - Upgrade to v0.962.
 
 * Tue Apr 9 2013 David E. Wheeler <david.wheeler@iovation.com> 0.961-1
@@ -402,7 +426,7 @@ Sqitch Vertica support.
 * Thu Feb 21 2013 David E. Wheeler <david.wheeler@iovation.com> 0.953-1
 - Upgrade to v0.953.
 
-* Fri Jan 12 2013 David E. Wheeler <david.wheeler@iovation.com> 0.952-1
+* Fri Jan 11 2013 David E. Wheeler <david.wheeler@iovation.com> 0.952-1
 - Upgrade to v0.952.
 
 * Mon Jan 7 2013 David E. Wheeler <david.wheeler@iovation.com> 0.951-1
@@ -411,7 +435,7 @@ Sqitch Vertica support.
 * Thu Jan 3 2013 David E. Wheeler <david.wheeler@iovation.com> 0.950-1
 - Upgrade to v0.950.
 
-* Fri Dec 3 2012 David E. Wheeler <david.wheeler@iovation.com> 0.940-1
+* Mon Dec 3 2012 David E. Wheeler <david.wheeler@iovation.com> 0.940-1
 - Upgrade to v0.940.
 
 * Fri Oct 12 2012 David E. Wheeler <david.wheeler@iovation.com> 0.938-1
@@ -456,7 +480,7 @@ Sqitch Vertica support.
 * Mon Aug 27 2012 David E. Wheeler <david.wheeler@iovation.com> 0.912-1
 - Upgrade to v0.912.
 
-* Wed Aug 23 2012 David E. Wheeler <david.wheeler@iovation.com> 0.911-1
+* Thu Aug 23 2012 David E. Wheeler <david.wheeler@iovation.com> 0.911-1
 - Upgrade to v0.911.
 
 * Wed Aug 22 2012 David E. Wheeler <david.wheeler@iovation.com> 0.91-1

@@ -6,19 +6,20 @@ perl:
   - "5.16"
   - "5.18"
   - "5.20"
+  - "5.22"
   - "dev"
-  - "blead"
+#  - "blead" https://github.com/travis-perl/helpers/issues/44
 
 matrix:
   include:
-    - perl: "5.20"
+    - perl: "5.22"
       env: COVERAGE=1
   allow_failures:
     - perl: "blead"
 
 before_install:
   - sudo apt-get update -qq
-  - sudo apt-get install -qq firebird2.5-superclassic firebird2.5-dev aspell-en unixodbc-dev
+  - sudo apt-get install -qq gettext firebird2.5-superclassic firebird2.5-dev aspell-en unixodbc-dev
   - sudo sed /ENABLE_FIREBIRD_SERVER=/s/no/yes/ -i /etc/default/firebird2.5
   - cat /etc/default/firebird2.5 | grep ENABLE_FIREBIRD_SERVER
   - sudo service firebird2.5-superclassic start

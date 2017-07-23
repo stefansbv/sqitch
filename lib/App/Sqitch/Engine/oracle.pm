@@ -15,7 +15,7 @@ use namespace::autoclean;
 
 extends 'App::Sqitch::Engine';
 
-our $VERSION = '0.9993';
+our $VERSION = '0.9997';
 
 BEGIN {
     # We tell the Oracle connector which encoding to use. The last part of the
@@ -136,7 +136,7 @@ sub _log_conflicts_param {
 }
 
 sub _ts2char_format {
-    q{to_char(%1$s AT TIME ZONE 'UTC', '"year":YYYY:"month":MM:"day":DD') || to_char(%1$s AT TIME ZONE 'UTC', ':"hour":HH24:"minute":MI:"second":SS:"time_zone":"UTC"')}
+    q{CAST(to_char(%1$s AT TIME ZONE 'UTC', '"year":YYYY:"month":MM:"day":DD') || to_char(%1$s AT TIME ZONE 'UTC', ':"hour":HH24:"minute":MI:"second":SS:"time_zone":"UTC"')  AS VARCHAR2(92 char))}
 }
 
 sub _ts_default { 'current_timestamp' }
@@ -335,12 +335,35 @@ sub name_for_change_id {
                    ROW_NUMBER() OVER (partition by project ORDER BY committed_at) AS rnk
               FROM tags
         )
-        SELECT change || COALESCE(t.tag, '')
+        SELECT change || COALESCE(t.tag, '@HEAD')
           FROM changes c
           LEFT JOIN tag t ON c.project = t.project AND t.committed_at >= c.committed_at
          WHERE change_id = ?
            AND (t.rnk IS NULL OR t.rnk = 1)
     }, undef, $change_id)->[0];
+}
+
+sub change_id_offset_from_id {
+    my ( $self, $change_id, $offset ) = @_;
+
+    # Just return the ID if there is no offset.
+    return $change_id unless $offset;
+
+    # Are we offset forwards or backwards?
+    my ( $dir, $op ) = $offset > 0 ? ( 'ASC', '>' ) : ( 'DESC' , '<' );
+    return $self->dbh->selectcol_arrayref(qq{
+        SELECT id FROM (
+            SELECT id, rownum AS rnum FROM (
+                SELECT change_id AS id
+                  FROM changes
+                 WHERE project = ?
+                   AND committed_at $op (
+                       SELECT committed_at FROM changes WHERE change_id = ?
+                 )
+                 ORDER BY committed_at $dir
+            )
+        ) WHERE rnum = ?
+    }, undef, $self->plan->project, $change_id, abs $offset)->[0];
 }
 
 sub change_offset_from_id {
@@ -661,22 +684,34 @@ sub _no_column_error  {
 sub _script {
     my $self = shift;
     my $uri  = $self->uri;
-    my $conn = $self->username // '';
-    if (my $pass = $self->password) {
-        $pass =~ s/"/""/g;
-        $conn .= qq{/"$pass"};
-    }
-    if (my $db = $uri->dbname) {
-        $conn .= '@';
-        $db =~ s/"/""/g;
-        if ($uri->host || $uri->_port) {
-            $conn .= '//' . ($uri->host || '');
-            if (my $port = $uri->_port) {
-                $conn .= ":$port";
+    my $conn = '';
+    my ($user, $pass, $host, $port) = (
+        $self->username, $self->password, $uri->host, $uri->_port
+    );
+    if ($user || $pass || $host || $port) {
+        $conn = $user // '';
+        if ($pass) {
+            $pass =~ s/"/""/g;
+            $conn .= qq{/"$pass"};
+        }
+        if (my $db = $uri->dbname) {
+            $conn .= '@';
+            $db =~ s/"/""/g;
+            if ($host || $port) {
+                $conn .= '//' . ($host || '');
+                if ($port) {
+                    $conn .= ":$port";
+                }
+                $conn .= qq{/"$db"};
+            } else {
+                $conn .= qq{"$db"};
             }
-            $conn .= qq{/"$db"};
-        } else {
-            $conn .= qq{"$db"};
+        }
+    } else {
+        # OS authentication or Oracle wallet (no username or password).
+        if (my $db = $uri->dbname) {
+            $db =~ s/"/""/g;
+            $conn = qq{/@"$db"};
         }
     }
     my %vars = $self->variables;
@@ -706,7 +741,7 @@ sub _capture {
 
     require IPC::Run3;
     IPC::Run3::run3(
-        [$self->sqlplus], \$conn, \@out, undef,
+        [$self->sqlplus], \$conn, \@out, @out,
         { return_if_system_error => 1 },
     );
     if (my $err = $?) {

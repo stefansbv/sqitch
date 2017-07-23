@@ -18,7 +18,7 @@ use namespace::autoclean;
 
 extends 'App::Sqitch::Engine';
 
-our $VERSION = '0.9993';
+our $VERSION = '0.9997';
 
 has registry_uri => (
     is       => 'ro',
@@ -563,10 +563,34 @@ sub name_for_change_id {
               JOIN tags ON c2.change_id = tags.change_id
              WHERE c2.committed_at >= c.committed_at
                AND c2.project = c.project
-        ), '')
+        ), '@HEAD')
           FROM changes c
          WHERE change_id = ?
     }, undef, $change_id)->[0];
+}
+
+sub _offset_op {
+    my ( $self, $offset ) = @_;
+    my ( $dir, $op ) = $offset > 0 ? ( 'ASC', '>' ) : ( 'DESC' , '<' );
+    return $dir, $op, 'SKIP ' . (abs($offset) - 1);
+}
+
+sub change_id_offset_from_id {
+    my ( $self, $change_id, $offset ) = @_;
+
+    # Just return the ID if there is no offset.
+    return $change_id unless $offset;
+
+    my ($dir, $op, $offset_expr) = $self->_offset_op($offset);
+    return $self->dbh->selectcol_arrayref(qq{
+        SELECT FIRST 1 $offset_expr change_id AS "id"
+          FROM changes
+         WHERE project = ?
+           AND committed_at $op (
+               SELECT committed_at FROM changes WHERE change_id = ?
+         )
+         ORDER BY committed_at $dir
+    }, undef, $self->plan->project, $change_id )->[0];
 }
 
 sub change_offset_from_id {
@@ -576,18 +600,12 @@ sub change_offset_from_id {
     return $self->load_change($change_id) unless $offset;
 
     # Are we offset forwards or backwards?
-    my ( $dir, $op ) = $offset > 0 ? ( 'ASC', '>' ) : ( 'DESC' , '<' );
+    my ($dir, $op, $offset_expr) = $self->_offset_op($offset);
     my $tscol  = sprintf $self->_ts2char_format, 'c.planned_at';
     my $tagcol = sprintf $self->_listagg_format, 't.tag';
 
-    $offset = abs($offset) - 1;
-    my ($offset_expr, $limit_expr) = ('', '');
-    if ($offset) {
-        $offset_expr = "SKIP $offset";
-    }
-
-    my $sql = qq{
-        SELECT $limit_expr $offset_expr
+    my $change = $self->dbh->selectrow_hashref(qq{
+        SELECT FIRST 1 $offset_expr
                c.change_id AS "id", c.change AS name, c.project, c.note,
                $tscol AS "timestamp", c.planner_name, c.planner_email,
                $tagcol AS tags
@@ -600,15 +618,10 @@ sub change_offset_from_id {
          GROUP BY c.change_id, c.change, c.project, c.note, c.planned_at,
                c.planner_name, c.planner_email, c.committed_at
          ORDER BY c.committed_at $dir
-    };
-    my $change
-        = $self->dbh->selectrow_hashref( $sql, undef, $self->plan->project,
-        $change_id )
-        || return undef;
+    }, undef, $self->plan->project, $change_id ) || return undef;
     $change->{timestamp} = _dt $change->{timestamp};
     unless ( ref $change->{tags} ) {
-        $change->{tags}
-            = $change->{tags} ? [ split / / => $change->{tags} ] : [];
+        $change->{tags} = $change->{tags} ? [ split / / => $change->{tags} ] : [];
     }
     return $change;
 }
@@ -649,7 +662,7 @@ sub change_id_for {
 
             # Find by change name and following tag.
             return $dbh->selectcol_arrayref(q{
-                SELECT changes.change_id
+                SELECT FIRST 1 changes.change_id
                   FROM changes
                   JOIN tags
                     ON changes.committed_at <= tags.committed_at
@@ -657,18 +670,21 @@ sub change_id_for {
                  WHERE changes.project = ?
                    AND changes.change  = ?
                    AND tags.tag        = ?
+                 ORDER BY changes.committed_at DESC
             }, undef, $project, $change, '@' . $tag)->[0];
         }
 
         # Find earliest by change name.
-        my $limit = $self->_can_limit ? " FIRST 1" : '';
-        return $dbh->selectcol_arrayref(qq{
-            SELECT $limit change_id
+        my $ids = $dbh->selectcol_arrayref(qq{
+            SELECT change_id
               FROM changes
              WHERE project = ?
                AND changes.change  = ?
              ORDER BY changes.committed_at ASC
-        }, undef, $project, $change)->[0];
+        }, undef, $project, $change);
+
+        # Return the ID.
+        return $self->_handle_lookup_index($change, $ids);
     }
 
     if ( my $tag = $p{tag} ) {

@@ -105,6 +105,66 @@ is_deeply [$mysql->mysql], [qw(
 ), @std_opts], 'mysql command should be configured';
 
 ##############################################################################
+# Make sure URI params get passed through to the client.
+$target = App::Sqitch::Target->new(
+    sqitch => $sqitch,
+    uri    => URI->new('db:mysql://foo.com/widgets?' . join(
+        '&',
+        'mysql_compression=1',
+        'mysql_ssl=1',
+        'mysql_connect_timeout=20',
+        'mysql_init_command=BEGIN',
+        'mysql_socket=/dev/null',
+        'mysql_ssl_client_key=/foo/key',
+        'mysql_ssl_client_cert=/foo/cert',
+        'mysql_ssl_ca_file=/foo/cafile',
+        'mysql_ssl_ca_path=/foo/capath',
+        'mysql_ssl_cipher=blowfeld',
+        'mysql_client_found_rows=20',
+        'mysql_foo=bar',
+    ),
+));
+ok $mysql = $CLASS->new(sqitch => $sqitch, target => $target),
+    'Create a mysql with query params';
+is_deeply [$mysql->mysql], [qw(
+    /path/to/mysql
+    --database widgets
+    --host     foo.com
+), @std_opts, qw(
+    --compress
+    --ssl
+    --connect_timeout 20
+    --init-command BEGIN
+    --socket /dev/null
+    --ssl-key /foo/key
+    --ssl-cert /foo/cert
+    --ssl-ca /foo/cafile
+    --ssl-capath /foo/capath
+    --ssl-cipher blowfeld
+)], 'mysql command should be configured with query vals';
+
+$target = App::Sqitch::Target->new(
+    sqitch => $sqitch,
+    uri    => URI->new('db:mysql://foo.com/widgets?' . join(
+        '&',
+        'mysql_compression=0',
+        'mysql_ssl=0',
+        'mysql_connect_timeout=20',
+        'mysql_client_found_rows=20',
+        'mysql_foo=bar',
+    ),
+));
+ok $mysql = $CLASS->new(sqitch => $sqitch, target => $target),
+    'Create a mysql with disabled query params';
+is_deeply [$mysql->mysql], [qw(
+    /path/to/mysql
+    --database widgets
+    --host     foo.com
+), @std_opts, qw(
+    --connect_timeout 20
+)], 'mysql command should not have disabled param options';
+
+##############################################################################
 # Now make sure that Sqitch options override configurations.
 $sqitch = App::Sqitch->new(
     options => {
@@ -290,6 +350,11 @@ is $dt->time_zone->name, 'UTC', 'DateTime TZ should be set';
 ##############################################################################
 # Can we do live tests?
 my $dbh;
+
+my $db = '__sqitchtest__' . $$;
+my $reg1 = '__metasqitch' . $$;
+my $reg2 = '__sqitchtest' . $$;
+
 END {
     return unless $dbh;
     $dbh->{Driver}->visit_child_handles(sub {
@@ -298,12 +363,9 @@ END {
     });
 
     return unless $dbh->{Active};
-    $dbh->do("DROP DATABASE IF EXISTS $_") for qw(
-        __sqitchtest__
-        __metasqitch
-        __sqitchtest
-    );
+    $dbh->do("DROP DATABASE IF EXISTS $_") for ($db, $reg1, $reg2);
 }
+
 
 my $err = try {
     $mysql->use_driver;
@@ -319,11 +381,11 @@ my $err = try {
             unless $dbh->{mysql_serverversion} >= 50300;
     }
     else {
-        die "MySQL >= 50100 required; this is $dbh->{mysql_serverversion}\n"
-            unless $dbh->{mysql_serverversion} >= 50100;
+        die "MySQL >= 50000 required; this is $dbh->{mysql_serverversion}\n"
+            unless $dbh->{mysql_serverversion} >= 50000;
     }
 
-    $dbh->do('CREATE DATABASE __sqitchtest__');
+    $dbh->do("CREATE DATABASE $db");
     undef;
 } catch {
     eval { $_->message } || $_;
@@ -337,12 +399,12 @@ DBIEngineTest->run(
         plan_file   => Path::Class::file(qw(t engine sqitch.plan))->stringify,
     }],
     target_params     => [
-        registry => '__metasqitch',
-        uri => URI::db->new('db:mysql://root@/__sqitchtest__'),
+        registry => $reg1,
+        uri => URI::db->new("db:mysql://root@/$db"),
     ],
     alt_target_params => [
-        registry => '__sqitchtest',
-        uri => URI::db->new('db:mysql://root@/__sqitchtest__'),
+        registry => $reg2,
+        uri => URI::db->new("db:mysql://root@/$db"),
     ],
     skip_unless       => sub {
         my $self = shift;
@@ -354,7 +416,7 @@ DBIEngineTest->run(
     engine_err_regex  => qr/^You have an error /,
     init_error        => __x(
         'Sqitch database {database} already initialized',
-        database => '__sqitchtest',
+        database => $reg2,
     ),
     add_second_format => q{date_add(%s, interval 1 second)},
     test_dbh => sub {

@@ -137,13 +137,17 @@ rather than from all available files.
 
 See also L</Files>.
 
+=item C<--global>
+
+An alias for C<--user> for the benefit of the muscle memory of Git users.
+
 =item C<--system>
 
-For writing options: write to system-wide F<$(prefix)/etc/sqitch/sqitch.plan>
+For writing options: write to system-wide F<$(prefix)/etc/sqitch/sqitch.conf>
 file rather than the repository F<./sqitch.conf>.
 
 For reading options: read only from system-wide
-F<$(prefix)/etc/sqitch/sqitch.plan> file rather than from all available files.
+F<$(prefix)/etc/sqitch/sqitch.conf> file rather than from all available files.
 
 Call C<sqitch --etc-path> to find out exactly where the system configuration
 file lives (e.g., C<$(sqitch --etc-path)/sqitch.conf>).
@@ -214,7 +218,7 @@ Local, project-specific configuration file.
 
 User-specific configuration file.
 
-=item F<$(prefix)/etc/sqitch/sqitch.plan>
+=item F<$(prefix)/etc/sqitch/sqitch.conf>
 
 System-wide configuration file.
 
@@ -473,6 +477,21 @@ C<sql>.
 An integer determining how verbose Sqitch should be. Defaults to 1. Set to 0
 to silence status messages and to 2 or three to increase verbosity. Error
 message output will not be affected by this property.
+
+=item C<core.pager>
+
+The command to use as a pager program. This overrides the C<PAGER>
+environment variable on UNIX like systems. Both can be overridden by setting
+the C<$SQITCH_PAGER> environment variable. If none of these variables are
+set, Sqitch makes a best-effort search among the commonly installed pager
+programs like C<less> and C<more>.
+
+=item C<core.editor>
+
+The command to use as a editor program. This overrides the C<EDITOR>
+environment variable on UNIX like systems. Both can be overridden by setting
+the C<$SQITCH_EDITOR> environment variable. If none of these variables are
+set, Sqitch defaults to C<notepad.exe> on Windows and C<vi> elsewhere.
 
 =back
 

@@ -54,6 +54,7 @@ sub run {
         change_id_for_depend
         name_for_change_id
         change_offset_from_id
+        change_id_offset_from_id
         load_change
     );
 
@@ -668,8 +669,8 @@ sub run {
         is_deeply all_events($engine), \@event_data,
             'The new change deploy should have been logged';
 
-        is $engine->name_for_change_id($change2->id), 'widgets',
-            'name_for_change_id() should return just the change name';
+        is $engine->name_for_change_id($change2->id), 'widgets@HEAD',
+            'name_for_change_id() should return name with symbolic tag @HEAD';
 
         ok $state = $engine->current_state, 'Get the current state again';
         isa_ok $dt = delete $state->{committed_at}, 'App::Sqitch::DateTime',
@@ -767,12 +768,13 @@ sub run {
 
         ######################################################################
         # Test deployed_changes(), deployed_changes_since(), load_change, and
-        # change_offset_from_id().
+        # change_offset_from_id(), and change_id_offset_from_id()
         can_ok $engine, qw(
             deployed_changes
             deployed_changes_since
             load_change
             change_offset_from_id
+            change_id_offset_from_id
         );
         my $change_hash = {
             id            => $change->id,
@@ -814,6 +816,11 @@ sub run {
         is_deeply $engine->change_offset_from_id($change2->id, 0), $change2_hash,
             'Should load change with offset 0';
 
+        is_deeply $engine->change_id_offset_from_id($change->id, undef), $change->id,
+            'Should get change ID with no offset';
+        is_deeply $engine->change_id_offset_from_id($change2->id, 0), $change2->id,
+            'Should get change ID with offset 0';
+
         # Now try some offsets.
         is_deeply $engine->change_offset_from_id($change->id, 1), $change2_hash,
             'Should find change with offset 1';
@@ -821,6 +828,13 @@ sub run {
             'Should find change with offset -1';
         is_deeply $engine->change_offset_from_id($change->id, 2), undef,
             'Should find undef change with offset 2';
+
+        is_deeply $engine->change_id_offset_from_id($change->id, 1), $change2->id,
+            'Should find change ID with offset 1';
+        is_deeply $engine->change_id_offset_from_id($change2->id, -1), $change->id,
+            'Should find change ID with offset -1';
+        is_deeply $engine->change_id_offset_from_id($change->id, 2), undef,
+            'Should find undef change ID with offset 2';
 
         # Revert change 2.
         ok $engine->log_revert_change($change2), 'Revert "widgets"';
@@ -1421,8 +1435,8 @@ sub run {
         # Make sure name_for_change_id() works properly.
         ok $engine->dbh->do(q{DELETE FROM tags WHERE project = 'engine'}),
             'Delete the engine project tags';
-        is $engine->name_for_change_id($change2->id), 'widgets',
-            'name_for_change_id() should return "widgets" for its ID';
+        is $engine->name_for_change_id($change2->id), 'widgets@HEAD',
+            'name_for_change_id() should return "widgets@HEAD" for its ID';
         is $engine->name_for_change_id($ext_change2->id), 'outside_in@meta',
             'name_for_change_id() should return "outside_in@meta" for its ID';
 
@@ -1569,19 +1583,19 @@ sub run {
         $mock_dbh->unmock('do');
 
         ######################################################################
+        # Revert and re-deploy all the changes.
+        my @all_changes  = ($change, $change2, $fred, $barney, $ext_change, $ext_change2, $hyper, $ext_change3);
+        ok $engine->log_revert_change($_),
+            'Revert "' . $_->name . '" change' for reverse @all_changes;
+        ok $engine->log_deploy_change($_),
+            'Deploy "' . $_->name . '" change' for @all_changes;
+
         if ($class eq 'App::Sqitch::Engine::pg') {
             # Test _update_ids by old ID; required only for pg, which was the
             # only engine that existed at the time.
             my @proj_changes = ($change, $change2, $fred, $barney, $hyper);
-            my @all_changes  = ($change, $change2, $fred, $barney, $ext_change, $ext_change2, $hyper, $ext_change3);
             my @proj_tags    = ($change->tags, $beta, $gamma);
             my @all_tags     = (@proj_tags, $ext_tag);
-
-            # Let's just revert and re-deploy them all.
-            ok $engine->log_revert_change($_),
-                'Revert "' . $_->name . '" change' for reverse @all_changes;
-            ok $engine->log_deploy_change($_),
-                'Deploy "' . $_->name . '" change' for @all_changes;
 
             my $upd_change = $engine->dbh->prepare(
                 'UPDATE changes SET change_id = ? WHERE change_id = ?'
@@ -1602,7 +1616,7 @@ sub run {
             $mock_engine->mock(plan => $plan);
             $mock_engine->mock(_update_ids => sub { shift });
 
-            is $engine->_update_ids, 9, 'Update IDs by old ID should return 9';
+            is $engine->_update_ids, 10, 'Update IDs by old ID should return 10';
 
             # All of the current project changes should be updated.
             is_deeply [ map { [@{$_}[0,1]] } @{ all_changes($engine) }],
@@ -1623,7 +1637,7 @@ sub run {
                 $upd_tag->execute($tag->old_id . $i++, $tag->id);
             }
 
-            is $engine->_update_ids, 9, 'Update IDs by name should also return 9';
+            is $engine->_update_ids, 10, 'Update IDs by name should also return 10';
 
             # All of the current project changes should be updated.
             is_deeply [ map { [@{$_}[0,1]] } @{ all_changes($engine) }],
@@ -1653,9 +1667,30 @@ sub run {
             $tmp_dir->file( $deploy_file->basename )->copy_to($deploy_file);
         };
 
-        # Make sure that change_id_for() is okay with the dupe.
-        is $engine->change_id_for( change => 'users'), $change->id,
-            'change_id_for() should find the earliest change ID';
+        # Make sure that change_id_for() chokes on the dupe.
+        MOCKVENT: {
+            my $sqitch_mocker = Test::MockModule->new(ref $sqitch);
+            my @args;
+            $sqitch_mocker->mock(vent => sub { shift; push @args => \@_ });
+            throws_ok { $engine->change_id_for( change => 'users') } 'App::Sqitch::X',
+                'Should die on ambiguous change spec';
+            is $@->ident, 'engine', 'Mode should be "engine"';
+            is $@->message, __ 'Change Lookup Failed',
+                'And it should report change lookup failure';
+            is_deeply \@args, [
+                [__x(
+                    'Change "{change}" is ambiguous. Please specify a tag-qualified change:',
+                    change => 'users',
+                )],
+                [ '  * ', $rev_change->format_name . '@HEAD' ],
+                [ '  * ', $change->format_tag_qualified_name ],
+            ], 'Should have vented output for lookup failure';
+        }
+
+        is $engine->change_id_for( change => 'users', tag => 'alpha'), $change->id,
+            'change_id_for() should find the tag-qualified change ID';
+        is $engine->change_id_for( change => 'users', tag => 'HEAD'), $rev_change->id,
+            'change_id_for() should find the reworked change ID @HEAD';
 
         ######################################################################
         # Tag and Rework the change again.
@@ -1678,8 +1713,8 @@ sub run {
         # make sure that change_id_for is still good with things.
         for my $spec (
             [
-                'first instance of change',
-                { change => 'users' },
+                'alpha instance of change',
+                { change => 'users', tag => 'alpha' },
                 $change->id,
             ],
             [

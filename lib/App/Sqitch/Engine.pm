@@ -14,7 +14,7 @@ use App::Sqitch::Types qw(Str Int Sqitch Plan Bool HashRef URI Maybe Target);
 use namespace::autoclean;
 use constant registry_release => '1.1';
 
-our $VERSION = '0.9993';
+our $VERSION = '0.9997';
 
 has sqitch => (
     is       => 'ro',
@@ -244,7 +244,7 @@ sub revert {
             $self->change_for_key($to)
         ) or do {
             # Not deployed. Is it in the plan?
-            if ( $plan->get($to) ) {
+            if ( $plan->find($to) ) {
                 # Known but not deployed.
                 hurl revert => __x(
                     'Change not deployed: "{change}"',
@@ -330,6 +330,7 @@ sub revert {
 
 sub verify {
     my ( $self, $from, $to ) = @_;
+    $self->_check_registry;
     my $sqitch   = $self->sqitch;
     my $plan     = $self->plan;
     my @changes  = $self->_load_changes( $self->deployed_changes );
@@ -393,7 +394,7 @@ sub _trim_to {
     my $sqitch = $self->sqitch;
     my $plan   = $self->plan;
 
-    # Find the change in the database.
+    # Find the to change in the database.
     my $to_id = $self->change_id_for_key( $key ) || hurl $ident => (
         $plan->contains( $key ) ? __x(
             'Change "{change}" has not been deployed',
@@ -410,7 +411,7 @@ sub _trim_to {
         change => $key,
     );
 
-    # Pope or shift changes till we find the change we want.
+    # Pop or shift changes till we find the change we want.
     if ($pop) {
         pop @{ $changes }   while $changes->[-1]->id ne $to_id;
     } else {
@@ -650,13 +651,28 @@ sub _params_for_key {
     my @off = ( offset => $offset );
     return ( @off, change => $cname, tag => $tag ) if $tag;
     return ( @off, change_id => $cname ) if $cname =~ /^[0-9a-f]{40}$/;
-    return ( @off, tag => '@' . $cname ) if $cname eq 'HEAD' || $cname eq 'ROOT';
+    return ( @off, tag => $cname ) if $cname eq 'HEAD' || $cname eq 'ROOT';
     return ( @off, change => $cname );
 }
 
 sub change_id_for_key {
     my $self = shift;
-    return $self->change_id_for( $self->_params_for_key(shift) );
+    return $self->find_change_id( $self->_params_for_key(shift) );
+}
+
+sub find_change_id {
+    my ( $self, %p ) = @_;
+
+    # Find the change ID or return undef.
+    my $change_id = $self->change_id_for(
+        change_id => $p{change_id},
+        change    => $p{change},
+        tag       => $p{tag},
+        project   => $p{project} || $self->plan->project,
+    ) // return;
+
+    # Return relative to the offset.
+    return $self->change_id_offset_from_id($change_id, $p{offset});
 }
 
 sub change_for_key {
@@ -736,6 +752,33 @@ sub _load_changes {
     }
 
     return @changes;
+}
+
+sub _handle_lookup_index {
+    my ( $self, $change, $ids ) = @_;
+
+    # Return if 0 or 1 ID.
+    return $ids->[0] if @{ $ids } <= 1;
+
+    # Too many found! Let the user know.
+    my $sqitch = $self->sqitch;
+    $sqitch->vent(__x(
+        'Change "{change}" is ambiguous. Please specify a tag-qualified change:',
+        change => $change,
+    ));
+
+    # Lookup, emit reverse-chron list of tag-qualified changes, and die.
+    my $plan = $self->plan;
+    for my $id ( reverse @{ $ids } ) {
+        # Look in the plan, first.
+        if ( my $change = $plan->find($id) ) {
+            $self->sqitch->vent( '  * ', $change->format_tag_qualified_name )
+        } else {
+            # Look it up in the database.
+            $self->sqitch->vent( '  * ', $self->name_for_change_id($id) // '' )
+        }
+    }
+    hurl engine => __ 'Change Lookup Failed';
 }
 
 sub _deploy_by_change {
@@ -980,6 +1023,11 @@ sub _check_registry {
     return $self if $newver == $oldver;
 
     hurl engine => __x(
+        'No registry found in {destination}. Have you ever deployed?',
+        destination => $self->registry_destination,
+    ) if $oldver == 0 && !$self->initialized;
+
+    hurl engine => __x(
         'Registry version is {old} but {new} is the latest known. Please upgrade Sqitch',
         old => $oldver,
         new => $newver,
@@ -1140,6 +1188,11 @@ sub name_for_change_id {
 sub change_offset_from_id {
     my $class = ref $_[0] || $_[0];
     hurl "$class has not implemented change_offset_from_id()";
+}
+
+sub change_id_offset_from_id {
+    my $class = ref $_[0] || $_[0];
+    hurl "$class has not implemented change_id_offset_from_id()";
 }
 
 sub registered_projects {
@@ -1399,10 +1452,13 @@ tables are created.
 Get, set, and clear engine variables. Variables are defined as key/value pairs
 to be passed to the engine client in calls to C<deploy> and C<revert>, if the
 client supports variables. For example, the
-L<PostgreSQL|App::Sqitch::Engine::pg> and L<Vertica|App::Sqitch::Engine::vertica>
-engines pass all the variables to their C<psql> and C<vsql> clients via the
-C<--set> option, while the L<Oracle engine|App::Sqitch::Engine::oracle> engine
-sets them via the SQL*Plus C<DEFINE> command.
+L<PostgreSQL|App::Sqitch::Engine::pg> and
+L<Vertica|App::Sqitch::Engine::vertica> engines pass all the variables to
+their C<psql> and C<vsql> clients via the C<--set> option, while the
+L<MySQL engine|App::Sqitch::Engine::mysql> engine sets them via the C<SET>
+command and the L<Oracle engine|App::Sqitch::Engine::oracle> engine sets them
+via the SQL*Plus C<DEFINE> command.
+
 
 =head3 C<deploy>
 
@@ -1559,7 +1615,7 @@ will be the offset number of changes before the latest change.
 
 =head3 C<change_for_key>
 
-  my $change = if $engine->change_for_key(key);
+  my $change = if $engine->change_for_key($key);
 
 Searches the deployed changes for a change corresponding to the specified key,
 which should be in a format as described in L<sqitchchanges>. Throws an
@@ -1568,16 +1624,16 @@ matches no changes.
 
 =head3 C<change_id_for_key>
 
-  my $change_id = if $engine->change_id_for_key(key);
+  my $change_id = if $engine->change_id_for_key($key);
 
 Searches the deployed changes for a change corresponding to the specified key,
 which should be in a format as described in L<sqitchchanges>, and returns the
-change's ID. Throws an exception if the key matches more than one changes.
+change's ID. Throws an exception if the key matches more than one change.
 Returns C<undef> if it matches no changes.
 
 =head3 C<change_for_key>
 
-  my $change = if $engine->change_for_key(key);
+  my $change = if $engine->change_for_key($key);
 
 Searches the list of deployed changes for a change corresponding to the
 specified key, which should be in a format as described in L<sqitchchanges>.
@@ -1643,6 +1699,13 @@ Search by change name or tag.
 
 The offset, if passed, will be applied relative to whatever change is found by
 the above algorithm.
+
+=head3 C<find_change_id>
+
+  my $change_id = $engine->find_change_id(%params);
+
+Like C<find_change()>, taking the same parameters, but returning an ID instead
+of a change.
 
 =head3 C<run_deploy>
 
@@ -1771,7 +1834,8 @@ re-deployed.
 );
 
 Searches the database for the change with the specified name, tag, and offset.
-The parameters are as follows:
+Throws an exception if the key matches more than one changes. Returns C<undef>
+if it matches no changes. The parameters are as follows:
 
 =over
 
@@ -1930,10 +1994,11 @@ should be the same as for those returned by C<deployed_changes()>.
 
   my $change_name = $engine->name_for_change_id($change_id);
 
-Returns the name of the change identified by the ID argument. If a tag was
-applied to a change after that change, the name will be returned with the tag
-qualification, e.g., C<app_user@beta>. This value should be suitable for
-uniquely identifying the change, and passing to the C<get> or C<index_of>
+Returns the tag-qualified name of the change identified by the ID. If a tag
+was applied to a change after that change, the name will be returned with the
+tag qualification, e.g., C<app_user@beta>. Otherwise, it will include the
+symbolic tag C<@HEAD>. e.g., C<widgets@HEAD>. This value should be suitable
+for uniquely identifying the change, and passing to the C<get> or C<index_of>
 methods of L<App::Sqitch::Plan>.
 
 =head3 C<registered_projects>
@@ -2279,6 +2344,13 @@ Otherwise, the change returned should be C<$offset> steps from that change ID,
 where C<$offset> may be positive (later step) or negative (earlier step).
 Returns C<undef> if the change was not found or if the offset is more than the
 number of changes before or after the change, as appropriate.
+
+=head3 C<change_id_offset_from_id>
+
+  my $id = $engine->change_id_offset_from_id( $change_id, $offset );
+
+Like C<change_offset_from_id()> but returns the change ID rather than the
+change object.
 
 =head3 C<registry_version>
 

@@ -86,7 +86,7 @@ has _path_segments => (
         my $ext  = '.' . $self->target->extension;
         if (my @rework_tags = $self->rework_tags) {
             # Determine suffix based on the first one found in the deploy dir.
-            my $dir = $self->target->deploy_dir;
+            my $dir = $self->deploy_dir;
             my $bn  = pop @path;
             my $first;
             for my $tag (@rework_tags) {
@@ -202,9 +202,17 @@ sub dependencies {
     return $self->requires, $self->conflicts;
 }
 
+sub deploy_dir {
+    my $self = shift;
+    my $target = $self->target;
+    return $self->is_reworked
+        ? $target->reworked_deploy_dir
+        : $target->deploy_dir;
+}
+
 sub deploy_file {
-    my $self   = shift;
-    $self->target->deploy_dir->file( $self->path_segments );
+    my $self = shift;
+    $self->deploy_dir->file( $self->path_segments );
 }
 
 sub _deploy_hash {
@@ -216,14 +224,30 @@ sub _deploy_hash {
     return $sha->hexdigest;
 }
 
+sub revert_dir {
+    my $self = shift;
+    my $target = $self->target;
+    return $self->is_reworked
+        ? $target->reworked_revert_dir
+        : $target->revert_dir;
+}
+
 sub revert_file {
-    my $self   = shift;
-    $self->target->revert_dir->file( $self->path_segments );
+    my $self = shift;
+    $self->revert_dir->file( $self->path_segments );
+}
+
+sub verify_dir {
+    my $self = shift;
+    my $target = $self->target;
+    return $self->is_reworked
+        ? $target->reworked_verify_dir
+        : $target->verify_dir;
 }
 
 sub verify_file {
-    my $self   = shift;
-    $self->target->verify_dir->file( $self->path_segments );
+    my $self = shift;
+    $self->verify_dir->file( $self->path_segments );
 }
 
 sub script_file {
@@ -251,6 +275,15 @@ sub action {
 sub format_name_with_tags {
     my $self = shift;
     return join ' ', $self->format_name, map { $_->format_name } $self->tags;
+}
+
+sub format_tag_qualified_name {
+    my $self = shift;
+    my ($tag) = $self->tags;
+    unless ($tag) {
+        ($tag) = $self->rework_tags or return $self->format_name . '@HEAD';
+    }
+    return join '', $self->format_name, $tag->format_name;
 }
 
 sub format_dependencies {
@@ -419,17 +452,35 @@ Returns the path segment for the change. For example, if the change is named
 C<('functions', 'bar.sql')> is returned. Internally, this data is used to
 create the deploy, revert, and verify file names.
 
+=head3 C<deploy_dir>
+
+  my $file = $change->deploy_dir;
+
+Returns the path to the deploy directory for the change.
+
 =head3 C<deploy_file>
 
   my $file = $change->deploy_file;
 
 Returns the path to the deploy script file for the change.
 
+=head3 C<revert_dir>
+
+  my $file = $change->revert_dir;
+
+Returns the path to the revert directory for the change.
+
 =head3 C<revert_file>
 
   my $file = $change->revert_file;
 
 Returns the path to the revert script file for the change.
+
+=head3 C<verify_dir>
+
+  my $file = $change->verify_dir;
+
+Returns the path to the verify directory for the change.
 
 =head3 C<verify_file>
 
@@ -523,6 +574,15 @@ deployed.
 
 Returns "deploy" if the change should be deployed, or "revert" if it should be
 reverted.
+
+=head3 C<format_tag_qualified_name>
+
+  my $tag_qualified_name = $change->format_tag_qualified_name;
+
+Returns a string with the change name followed by the next tag in the plan.
+Useful for displaying unambiguous change specifications for reworked changes.
+If there is no tag appearing in the file after the change, the C<@HEAD> will
+be used.
 
 =head3 C<format_name_with_tags>
 

@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use 5.010;
 use utf8;
-use Test::More tests => 87;
+use Test::More tests => 97;
 #use Test::More 'no_plan';
 use Test::NoWarnings;
 use App::Sqitch;
@@ -48,9 +48,12 @@ can_ok $CLASS, qw(
     tags
     add_tag
     plan
+    deploy_dir
     deploy_file
     script_hash
+    revert_dir
     revert_file
+    revert_dir
     verify_file
     requires
     conflicts
@@ -60,6 +63,7 @@ can_ok $CLASS, qw(
     format_name
     format_dependencies
     format_name_with_tags
+    format_tag_qualified_name
     format_name_with_dependencies
     format_op_name_dependencies
     format_planner
@@ -70,7 +74,10 @@ my $sqitch = App::Sqitch->new( options => {
     engine => 'sqlite',
     top_dir => dir('test-change')->stringify,
 });
-my $target = App::Sqitch::Target->new(sqitch => $sqitch);
+my $target = App::Sqitch::Target->new(
+    sqitch => $sqitch,
+    reworked_dir => dir('test-change/reworked'),
+);
 my $plan   = App::Sqitch::Plan->new(sqitch => $sqitch, target => $target);
 make_path 'test-change';
 END { remove_tree 'test-change' };
@@ -98,10 +105,16 @@ my $tag = App::Sqitch::Plan::Tag->new(
 
 is_deeply [ $change->path_segments ], ['foo.sql'],
     'path_segments should have the file name';
+is $change->deploy_dir, $target->deploy_dir,
+    'The deploy dir should be correct';
 is $change->deploy_file, $target->deploy_dir->file('foo.sql'),
     'The deploy file should be correct';
+is $change->revert_dir, $target->revert_dir,
+    'The revert dir should be correct';
 is $change->revert_file, $target->revert_dir->file('foo.sql'),
     'The revert file should be correct';
+is $change->verify_dir, $target->verify_dir,
+    'The verify dir should be correct';
 is $change->verify_file, $target->verify_dir->file('foo.sql'),
     'The verify file should be correct';
 ok !$change->is_reworked, 'The change should not be reworked';
@@ -111,18 +124,20 @@ is_deeply [ $change->path_segments ], ['foo.sql'],
 # Test script_hash.
 is $change->script_hash, undef,
     'Nonexistent deploy script hash should be undef';
-make_path $change->deploy_file->dir->stringify;
+make_path $change->deploy_dir->stringify;
 $change->deploy_file->spew(iomode => '>:raw', encode_utf8 "Foo\nBar\nBøz\n亜唖娃阿" );
 $change = $CLASS->new( name => 'foo', plan => $plan );
 is $change->script_hash, 'd48866b846300912570f643c99b2ceec4ba29f5c',
     'Deploy script hash should be correct';
+is $change->format_tag_qualified_name, 'foo@HEAD',
+    'Tag-qualified name should be tagged with @HEAD';
 
 # Identify it as reworked.
 ok $change->add_rework_tags($tag), 'Add a rework tag';
 is_deeply [$change->rework_tags], [$tag], 'Reworked tag should be stored';
 ok $change->is_reworked, 'The change should be reworked';
-$target->deploy_dir->mkpath;
-$target->deploy_dir->file('foo@alpha.sql')->touch;
+$change->deploy_dir->mkpath;
+$change->deploy_dir->file('foo@alpha.sql')->touch;
 is_deeply [ $change->path_segments ], ['foo@alpha.sql'],
     'path_segments should now include suffix';
 
@@ -141,8 +156,10 @@ is_deeply [ $change->path_segments ], ['foo@alpha.sql'],
     'path_segments should now include the correct suffixc';
 
 is $change->format_name, 'foo', 'Name should format as "foo"';
-is $change->format_name_with_tags,
-    'foo', 'Name should format with tags as "foo"';
+is $change->format_name_with_tags, 'foo',
+    'Name should format with tags as "foo"';
+is $change->format_tag_qualified_name, 'foo@beta',
+    'Tag-qualified Name should format as "foo@beta"';
 is $change->format_dependencies, '', 'Dependencies should format as ""';
 is $change->format_name_with_dependencies, 'foo',
     'Name should format with dependencies as "foo"';
@@ -274,12 +291,16 @@ ok $change2->add_tag($tag), 'Add a tag';
 is_deeply [$change2->tags], [$tag], 'Should have the tag';
 is $change2->format_name_with_tags, 'yo/howdy @alpha',
     'Should format name with tags';
+is $change2->format_tag_qualified_name, 'yo/howdy@alpha',
+    'Should format tag-qualiified name';
 
 # Add another tag.
 ok $change2->add_tag($tag2), 'Add another tag';
 is_deeply [$change2->tags], [$tag, $tag2], 'Should have both tags';
 is $change2->format_name_with_tags, 'yo/howdy @alpha @beta',
     'Should format name with both tags';
+is $change2->format_tag_qualified_name, 'yo/howdy@alpha',
+    'Should format tag-qualified name with first tag';
 
 is $change2->format_planner, 'Barack Obama <potus@whitehouse.gov>',
     'Planner name and email should format properly';
@@ -298,12 +319,18 @@ my @fn = ('yo', 'howdy@beta.sql');
 $change2->add_rework_tags($tag2);
 is_deeply [ $change2->path_segments ], \@fn,
     'path_segments should include directories';
-is $change2->deploy_file, $target->deploy_dir->file(@fn),
-    'The deploy file should include the suffix';
-is $change2->revert_file, $target->revert_dir->file(@fn),
-    'The revert file should include the suffix';
-is $change2->verify_file, $target->verify_dir->file(@fn),
-    'The verify file should include the suffix';
+is $change2->deploy_dir, $target->reworked_deploy_dir,
+    'Deploy dir should be in rworked dir';
+is $change2->deploy_file, $target->reworked_deploy_dir->file(@fn),
+    'Deploy file should be in rworked dir and include suffix';
+is $change2->revert_dir, $target->reworked_revert_dir,
+    'Revert dir should be in rworked dir';
+is $change2->revert_file, $target->reworked_revert_dir->file(@fn),
+    'Revert file should be in rworked dir and include suffix';
+is $change2->verify_dir, $target->reworked_verify_dir,
+    'Verify dir should be in rworked dir';
+is $change2->verify_file, $target->reworked_verify_dir->file(@fn),
+    'Verify file should be in rworked dir and include suffix';
 
 ##############################################################################
 # Test open_script.
